@@ -10,10 +10,12 @@ y = 0. The tenon hangs below y = 0, inside the pedestal.
 Print pose (`make_figure`): the same x and y on the bed, the front face up (+z).
 """
 
+import math
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
+import numpy as np
 import shapely
 from build123d import Face, Part, Pos, Rot, Wire, extrude
 from shapely import affinity
@@ -30,6 +32,11 @@ CRUMB = 0.05  # mm2: smaller pieces of a band are left out
 SPECK = 0.3  # mm2: thinner-than-a-line gaps this small are filled, not widened
 HAIR = 0.025  # mm: cracks between two bands narrower than 2 * HAIR are boolean noise
 SIMPLIFY = 0.01  # mm: polyline tolerance of the colour regions
+# Standing steady: the centre of mass must lie this far inside the support, or the tenon
+# carries the whole weight on one side and the figure leans by the slot clearance.
+SUPPORT_MARGIN = 3.0  # mm
+MIN_POST = 4.0  # mm: the narrowest post (9 lines)
+MAX_POST = 0.25  # the tallest post, as a share of the figure height
 
 
 @dataclass(frozen=True)
@@ -40,9 +47,16 @@ class Layout:
     body: BaseGeometry  # band 0 above the foot (drawing + backing, cut flat)
     tenon: Polygon  # below y = 0
     bands: list[BaseGeometry]  # printable footprint of every band; bands[0] has the tenon
-    foot: tuple[float, float]  # x range of the flat contact at y = 0
+    foot: tuple[float, float]  # x range of every contact at y = 0 (the tenon's width)
     cut: float  # how much of the drawing's bottom was cut off for the foot (mm)
     size: tuple[float, float]  # width and height of the body
+    centre_x: float  # centre of mass of the standee above the foot
+    post: tuple[float, float, float] | None  # x0, x1, top of the post added for support
+
+    @property
+    def beside(self) -> float:
+        """How far the centre of mass lies outside the support (0 = over it)."""
+        return max(0.0, self.foot[0] - self.centre_x, self.centre_x - self.foot[1])
 
 
 @cache
@@ -125,29 +139,93 @@ def _backing(fig: Figure, art: BaseGeometry) -> BaseGeometry:
     return parts[0]
 
 
+def chord(geom: BaseGeometry, y: float) -> list[tuple[float, float]]:
+    """The x ranges where a horizontal line at height y crosses a geometry, left to right."""
+    x0, _, x1, _ = geom.bounds
+    cut = geom.intersection(LineString([(x0 - 1, y), (x1 + 1, y)]))
+    lines = [g for g in getattr(cut, "geoms", [cut]) if g.geom_type == "LineString"]
+    return sorted((g.bounds[0], g.bounds[2]) for g in lines if g.length > 0)
+
+
+def _with_bar(body: BaseGeometry, x0: float, x1: float, y0: float, y1: float) -> Polygon:
+    """The body with a block of its own colour added (a ground bar or a post)."""
+    out = polygons(unary_union([body, box(x0, y0, x1, y1)]))
+    if len(out) != 1:  # never drop part of a figure silently
+        raise ValueError(f"a support block at x {x0:.1f}..{x1:.1f} does not join the body")
+    return out[0]
+
+
 def _foot(fig: Figure, body: Polygon) -> tuple[float, tuple[float, float]]:
     """Height of the cut that gives a flat contact of at least min_foot, and its x range.
 
     The first cut that reaches min_foot wins. If none does within max_cut of the height,
     the cut with the widest contact wins.
     """
-    x0, y0, x1, _ = body.bounds
+    y0 = body.bounds[1]
     best = (0.0, (0.0, 0.0), 0.0)
     # steps of 0.1 mm (the foot does not have to be on any grid); start just above the
     # bottom, so that a flat bottom tilted by the simplification still counts as flat
     limit = fig.max_cut * fig.height
     c = 2 * SIMPLIFY
     while c <= limit + 1e-9:
-        chord = body.intersection(LineString([(x0 - 1, y0 + c), (x1 + 1, y0 + c)]))
-        if not chord.is_empty and chord.length > best[2]:
-            cb = chord.bounds
-            best = (c, (cb[0], cb[2]), chord.length)
-            if chord.length >= fig.min_foot:
+        segs = chord(body, y0 + c)
+        width = sum(b - a for a, b in segs)
+        if width > best[2]:
+            best = (c, (segs[0][0], segs[-1][1]), width)
+            if width >= fig.min_foot:
                 break
         c = round(c + 0.1, 6)
     if best[2] <= 0:
         raise ValueError(f"{fig.name}: no flat foot found")
     return best[0], best[1]
+
+
+def centre_x(bands: list[BaseGeometry], z: list[tuple[float, float]]) -> float:
+    """x of the centre of mass of stacked bands (area times thickness)."""
+    weights = [(b.area * (z1 - z0), b.centroid.x) for b, (z0, z1) in zip(bands, z)
+               if not b.is_empty]
+    return sum(w * x for w, x in weights) / sum(w for w, _ in weights)
+
+
+def _post(fig: Figure, body: Polygon, foot: tuple[float, float],
+          com: float) -> tuple[float, float, float] | None:
+    """Where a post must go so that the centre of mass lies over the support, or None.
+
+    The post goes under the lowest part of the figure beyond the centre of mass (Konqi's
+    raised foot), as wide as that part 1 mm above its lowest point, at least MIN_POST.
+    """
+    lo, hi = foot
+    m = SUPPORT_MARGIN
+    if lo + m <= com <= hi - m:
+        return None
+    x0, _, x1, _ = body.bounds
+    xs = np.arange(x0 + 0.25, x1, 0.5)
+    xs = xs[xs <= com - m] if com < lo + m else xs[xs >= com + m]
+    lowest = None
+    for x in xs:
+        column = body.intersection(LineString([(x, -1.0), (x, 1e4)]))
+        if not column.is_empty and (lowest is None or column.bounds[1] < lowest[1]):
+            lowest = (x, column.bounds[1])
+    side = abs(com - (lo if com < lo else hi))
+    if lowest is None or lowest[1] > MAX_POST * fig.height:
+        low = f"the lowest is {lowest[1]:.1f} mm up" if lowest else "there is nothing there"
+        raise ValueError(
+            f"{fig.name}: the centre of mass lies {side:.1f} mm beside the foot, and no part "
+            f"of the figure beyond it is low enough for a post ({low}). Set support=False "
+            f"to accept a lean of up to {lean_limit(fig):.1f}° in the slot, or change "
+            "min_foot or ground")
+    x, y = lowest
+    top = y + 1.0  # the post reaches 1 mm into the part
+    a, b = next(((a, b) for a, b in chord(body, top) if a - 1e-6 <= x <= b + 1e-6), (x, x))
+    if b - a < MIN_POST:
+        a, b = (a + b) / 2 - MIN_POST / 2, (a + b) / 2 + MIN_POST / 2
+    return a, b, top
+
+
+def lean_limit(fig: Figure) -> float:
+    """The largest lean (degrees) the slot allows a figure whose centre of mass lies beside
+    its foot: it pivots on the foot edge until the tenon meets one wall."""
+    return math.degrees(math.atan2(P.CLR_SLOT, fig.tenon_h))
 
 
 def _thin(geom: BaseGeometry, r: float) -> BaseGeometry:
@@ -169,9 +247,9 @@ def layout(fig: Figure) -> Layout:
         art = filled
     body = _backing(fig, art)
     if fig.ground > 0:  # a bar under everything within `ground` of the bottom
-        x0, y0, x1, y1 = body.bounds
+        x0, y0, x1, _ = body.bounds
         gx0, _, gx1, _ = body.intersection(box(x0, y0, x1, y0 + fig.ground)).bounds
-        body = unary_union([body, box(gx0, y0, gx1, y0 + fig.ground)])
+        body = _with_bar(body, gx0, gx1, y0, y0 + fig.ground)
     cut, foot = _foot(fig, body)
     y_cut = body.bounds[1] + cut
 
@@ -181,8 +259,6 @@ def layout(fig: Figure) -> Layout:
     above = box(-1e4, y_cut, 1e4, 1e4)
     body = shift(body.intersection(above))
     regions = {f: shift(g.intersection(above)) for f, g in regions.items()}
-    # the tenon reaches 0.05 mm into the body, so the two always fuse into one solid
-    tenon = box(foot[0], -fig.tenon_h, foot[1], 0.05)
 
     bands = [opening(body, P.MIN_STROKE / 2)]
     for k in range(1, len(fig.bands)):
@@ -209,9 +285,20 @@ def layout(fig: Figure) -> Layout:
             raise ValueError(f"{fig.name}: band {k} ({fig.bands[k]}) is empty; "
                              "remove it from bands or map some colour to it")
         bands.append(fk)
+    # stand steady: a post (body colour, band 0 only) when the centre of mass lies
+    # beside the foot. It changes no colour band, so the bands need no second pass.
+    com = centre_x(bands, band_z(fig))
+    post = _post(fig, body, foot, com) if fig.support else None
+    if post is not None:
+        body = _with_bar(body, post[0], post[1], 0.0, post[2])
+        bands[0] = _with_bar(bands[0], post[0], post[1], 0.0, post[2])
+        foot = (min(foot[0], post[0]), max(foot[1], post[1]))
+        com = centre_x(bands, band_z(fig))
+    # the tenon reaches 0.05 mm into the body, so the two always fuse into one solid
+    tenon = box(foot[0], -fig.tenon_h, foot[1], 0.05)
     bands[0] = _clean(unary_union([bands[0], tenon]))
     x0, y0, x1, y1 = body.bounds
-    return Layout(regions, body, tenon, bands, foot, cut, (x1 - x0, y1 - y0))
+    return Layout(regions, body, tenon, bands, foot, cut, (x1 - x0, y1 - y0), com, post)
 
 
 def band_z(fig: Figure) -> list[tuple[float, float]]:

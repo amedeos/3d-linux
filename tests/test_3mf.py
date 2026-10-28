@@ -133,3 +133,12 @@ def test_project_gets_the_config_from_the_gcode(tmp_path):
     project = tmp_path / "projects" / "plate.3mf"
     make_project(plate, config, project)
     assert zipfile.ZipFile(project).read(CONFIG_ENTRY).decode() == config
+
+
+def test_export_reports_posts_and_leans():
+    from linux3d.export import stability_notes
+
+    notes = stability_notes([FIGURES["konqi"], FIGURES["gentoo_logo"], FIGURES["larry"]])
+    assert any(n.startswith("konqi: post under") for n in notes)
+    assert any(n.startswith("gentoo_logo: centre of mass") and "0.7°" in n for n in notes)
+    assert not any(n.startswith("larry") for n in notes)

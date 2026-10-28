@@ -22,4 +22,4 @@ def test_volumes_are_sane(parts, name):
     # a boolean that fails silently can drop half of a part without any error
     standee = parts[f"{name}_standee"].volume / 1000
     pedestal = parts[f"{name}_pedestal"].volume / 1000
-    assert 8 < standee < 40 and 20 < pedestal < 60
+    assert 8 < standee < 40 and 30 < pedestal < 80

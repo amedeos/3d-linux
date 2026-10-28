@@ -89,7 +89,10 @@ def main(argv: list[str] | None = None) -> None:
     elif command == "export":
         from .export import export_all
 
-        report = export_all(Path("out"), figs)
+        try:
+            report = export_all(Path("out"), figs)
+        except ValueError as e:  # e.g. a figure that cannot stand
+            _fail(str(e))
         sys.exit(1 if any(report.values()) else 0)
     elif command == "slice":
         from .slicer import main as slice_main

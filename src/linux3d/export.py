@@ -179,6 +179,22 @@ def assembly_preview(figs: list[Figure], gap: float = 20.0) -> list[tuple[str, P
     return items
 
 
+def stability_notes(figs: list[Figure]) -> list[str]:
+    """One line for every figure that got a post or that will lean in its slot."""
+    notes = []
+    for fig in figs:
+        lay = relief.layout(fig)
+        if lay.post is not None:
+            x0, x1, top = lay.post
+            notes.append(f"{fig.name}: post under the figure at x {x0:.1f}..{x1:.1f} mm, "
+                         f"{top:.1f} mm high, so the centre of mass lies over the support")
+        if lay.beside > 0:
+            notes.append(f"{fig.name}: centre of mass {lay.beside:.1f} mm beside the foot "
+                         f"(support=False): it leans in the slot by up to "
+                         f"{relief.lean_limit(fig):.1f}°")
+    return notes
+
+
 def export_all(out: Path, figs: list[Figure] | None = None,
                coupon: bool = True) -> dict[str, list[str]]:
     """Write every STL into out/stl and the 3MF plates into out/3mf; return the problems."""
@@ -204,6 +220,8 @@ def export_all(out: Path, figs: list[Figure] | None = None,
     plan_path.write_text(json.dumps(plan, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     write_3mf(mf_dir / "assembly_preview.3mf", assembly_preview(figs))
     print(f"{'assembly_preview.3mf':52s} view only")
+    for note in stability_notes(figs):
+        print(f"stability: {note}")
     return report
 
 

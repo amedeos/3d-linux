@@ -23,7 +23,7 @@ Parametric, printable Linux logos and mascots: the Gentoo "g" logo, Larry the Co
 
 ```sh
 uv sync
-uv run pytest                  # ~50 s
+uv run pytest                  # ~60 s
 uv run linux3d list
 uv run linux3d export [FIGURE ...] [--height MM] [--bands a,b] [--set key=value]
 uv run linux3d slice [--material pla]   # optional, PrusaSlicer CLI
@@ -57,7 +57,9 @@ uv run linux3d render [FIGURE ...] [--gif]
 - **M600.** Band k starts at `base_t + (k - 1) * band_t`. Its M600 is at `layer_top()` of that height.
 - **Colour map.** `Figure.colours` maps an SVG element id (`path919`, `path919:stroke`, or `#n` for elements without id) or a colour (`#b8b8b8`) to a filament or to `DROP`. Everything else takes the nearest band colour. Shapes more transparent than `min_opacity` are shading and are left out, unless the map names them. Check every change on `out/render/<name>_flat.png`.
 - **Body.** `backing="outline"` grows the drawing by `margin`. If the drawing falls apart into pieces (Plasma's dots), use `hull`, `circle` or `rounded_rect`. `background` fills holes inside the drawing, for drawings that rely on white paper.
-- **Foot and tenon.** The body is cut flat at the bottom until the contact is `min_foot` wide (at most `max_cut` of the height). `ground` adds a bar under the feet instead. The tenon is as wide as the contact, `base_t` thick and `tenon_h` long.
+- **Foot and tenon.** The body is cut flat at the bottom until the contact is `min_foot` wide (at most `max_cut` of the height). `ground` (mm) adds a bar under the feet instead. With `support`, `layout()` adds a post (see Stability). The tenon spans every contact, is `base_t` thick and `tenon_h` long.
+- **Stability.** The tenon in the slot holds the figure, not the foot. If the centre of mass lies beside the foot, the figure pivots on the foot edge until the tenon meets one slot wall: `lean_limit()` = atan(CLR_SLOT / tenon_h) = 0.7°. So `layout()` computes the centre of mass (`centre_x`: band areas times thickness) and, with `support`, adds a post (`_post`) under the lowest part beyond it, at least `MIN_POST` wide and at most `MAX_POST` of the height tall, until the centre of mass lies `SUPPORT_MARGIN` (3 mm) inside. It never uses fixed millimetres, so it works at any height (an earlier fixed-mm version silently stopped working with `--height`). If no part is low enough, it raises an error. Konqi gets a post under its raised foot (6.4 mm up). The Gentoo logo has `support=False` (a post would change the logo's outline) and leans by up to 0.7°; `export` prints a note for posts and leans.
+- **Tipping.** The light assembly (30-51 g) tips over backwards first. The pedestal is 45 % of the figure height deep (`DEPTH_SHARE`, more if the lettering needs `TEXT_ROOM`), and the figure stands 45 % of the depth from the back edge (`BACK_SHARE`), with an explicit `pedestal_d` too (too small raises an error with the minimum). With the slot near the back edge, the tip angle was only 16-24°; now 26° (Plasma) to 38° (Konqi). Tests: the centre of mass 3 mm inside the support at 60/100/150 mm, and at least 25° of tilt in every direction (densities from PrusaSlicer: standee 0.92, pedestal 0.43 g/cm3).
 - **Cleanup in 2D, not in OCCT.** All booleans run in shapely. Grooves of a lower colour narrower than `MIN_GAP` are widened (long ones) or filled (specks below `SPECK`, and only specks that touch the band: a lone speck would become a raised sliver). Then raised parts thinner than `MIN_STROKE` (85 % of a line) are removed, as the last change to the shape. Finally, cracks of the lower colour narrower than `2 * HAIR` are filled: opening and simplifying move shared edges by a hair, and those cracks showed as thin rings (orange rings around Plasma's dots). A crack always lies against the band, so filling it adds no sliver. `_tidy()` removes zero-width spikes and tiny holes (they gave degenerate faces and a 3MF mesh error); `_clean()` also simplifies.
 
 ## Frames

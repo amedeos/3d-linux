@@ -7,6 +7,7 @@ Assembly frame: the pedestal's top face is at z = 0, the figure's back face is a
 and its front faces -y (towards the viewer). `print_pose` lifts the pedestal onto the bed.
 """
 
+import math
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -33,6 +34,12 @@ CORNER = 4.0  # corner radius of the footprint
 SIDE_WALL = 5.0  # least material beside the slot (mm)
 BACK = 7.0  # least material behind the slot (mm)
 TEXT_GAP = 2.0  # lettering <-> chamfer and lettering <-> figure (mm)
+# Stability: the light assembly tips over backwards first. A deep pedestal, with the
+# figure close to the middle of it, doubles the push it takes at the top (README).
+DEPTH_SHARE = 0.45  # automatic depth, as a share of the figure height
+BACK_SHARE = 0.45  # share of the depth behind the figure's back face
+MIN_DEPTH = 30.0  # mm
+TEXT_ROOM = 8.0  # least depth for the lettering (mm); an automatic depth grows for it
 
 
 @dataclass(frozen=True)
@@ -54,10 +61,20 @@ def size(fig: Figure, clr: float = P.CLR_SLOT) -> Size:
     width = lay.size[0]
     half = max(fig.pedestal_w / 2 or 0.36 * width, abs(slot[0]) + SIDE_WALL + CHAMFER,
                abs(slot[1]) + SIDE_WALL + CHAMFER)
-    y1 = slot[3] + BACK + CHAMFER
-    # never thinner in front of the slot than beside it, whatever pedestal_d says
-    depth = max(fig.pedestal_d or max(0.36 * fig.height, 26.0),
-                y1 - slot[2] + SIDE_WALL + CHAMFER)
+    depth = fig.pedestal_d or max(DEPTH_SHARE * fig.height, MIN_DEPTH)
+    # the figure's back face (y = 0) sits BACK_SHARE of the depth from the back edge
+    y1 = max(slot[3] + BACK + CHAMFER, BACK_SHARE * depth)
+    # in front: the lettering, or at least a wall as thick as the ones beside the slot
+    if fig.title:
+        front = thickness(fig) + 2 * TEXT_GAP + TEXT_ROOM + CHAMFER
+    else:
+        front = -slot[2] + SIDE_WALL + CHAMFER
+    if y1 - depth > -front:
+        if fig.pedestal_d:
+            raise ValueError(
+                f"{fig.name}: pedestal_d = {fig.pedestal_d} leaves no room in front of the "
+                f"figure; use at least {math.ceil((y1 + front) * 10) / 10} mm")
+        depth = y1 + front
     slot_depth = P.snap_up(fig.tenon_h + P.SLOT_FLOOR_GAP)  # validate() checks the floor
     return Size(-half, half, y1 - depth, y1, fig.pedestal_h, slot, slot_depth)
 

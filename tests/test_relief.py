@@ -1,5 +1,6 @@
 """The 2D side: SVG reading, colour mapping, bands, foot, tenon and slot."""
 
+import math
 from dataclasses import replace
 
 import numpy as np
@@ -215,11 +216,31 @@ def test_slot_deeper_than_the_pedestal_is_refused_early():
 
 
 def test_pedestal_keeps_a_wall_in_front_of_the_slot():
-    """Without lettering and with a tiny pedestal_d, the slot must not break through."""
-    fig = figure("larry", title="", pedestal_d=4.0)
-    s = pedestal.size(fig)
+    """Without lettering, the slot must not break through the front."""
+    s = pedestal.size(figure("larry", title=""))
     assert s.slot[2] - s.y0 >= pedestal.SIDE_WALL + pedestal.CHAMFER - 1e-9
-    assert pedestal.make_pedestal(fig).is_valid
+
+
+def test_too_small_pedestal_depth_is_refused():
+    with pytest.raises(ValueError, match="use at least 17.8 mm"):
+        pedestal.size(figure("larry", title="", pedestal_d=4.0))
+
+
+def test_explicit_pedestal_depth_is_honoured():
+    s = pedestal.size(figure("konqi", pedestal_d=60.0))
+    assert s.y1 - s.y0 == pytest.approx(60.0)
+    assert s.y1 == pytest.approx(pedestal.BACK_SHARE * 60.0)  # figure 45 % from the back
+
+
+def test_small_figure_keeps_room_for_its_lettering():
+    """The automatic depth grows for the lettering instead of failing (it used to fail
+    for a 50 mm Plasma with thicker bands)."""
+    fig = figure("plasma_logo", height=50.0, band_t=1.2)
+    s = pedestal.size(fig)
+    room = (-relief.thickness(fig) - pedestal.TEXT_GAP) - (s.y0 + pedestal.CHAMFER
+                                                           + pedestal.TEXT_GAP)
+    assert room >= pedestal.TEXT_ROOM - 1e-9
+    assert pedestal.lettering(fig, s) is not None
 
 
 @pytest.mark.parametrize("fig", FIGS, ids=IDS)
@@ -227,3 +248,115 @@ def test_plinth_grows_upwards_from_the_bottom(fig):
     """Both extrusions go up (dir given), so the plinth spans exactly -h .. 0."""
     bb = pedestal._plinth(pedestal.size(fig)).bounding_box()
     assert bb.min.Z == pytest.approx(-fig.pedestal_h) and bb.max.Z == pytest.approx(0.0)
+
+
+# --- stability --------------------------------------------------------------------------
+HEIGHTS = (60.0, 100.0, 150.0)
+SUPPORTED = [n for n, f in FIGURES.items() if f.support]
+# grams per cm3 of model, from PrusaSlicer (PETG, 15 % infill): the thin standees are
+# almost solid, the pedestals are mostly infill
+STANDEE_DENSITY, PEDESTAL_DENSITY = 0.92, 0.43
+
+
+def contacts(lay) -> list[tuple[float, float]]:
+    """Where the standee touches the pedestal's top face."""
+    return relief.chord(lay.bands[0], 0.06)  # just above the tenon (it reaches 0.05)
+
+
+@pytest.mark.parametrize("height", HEIGHTS)
+@pytest.mark.parametrize("name", SUPPORTED)
+def test_centre_of_mass_lies_over_the_support_at_any_height(name, height):
+    """With `support`, the centre of mass lies 3 mm inside the support at every size:
+    the post is placed from the centre of mass, not from fixed millimetres."""
+    lay = relief.layout(figure(name, height=height))
+    assert lay.foot[0] + relief.SUPPORT_MARGIN - 1e-6 <= lay.centre_x
+    assert lay.centre_x <= lay.foot[1] - relief.SUPPORT_MARGIN + 1e-6
+    # the printed contacts really surround the centre of mass (a round bottom makes them
+    # a little wider than the cut, never narrower)
+    touch = contacts(lay)
+    assert touch[0][0] <= lay.centre_x - relief.SUPPORT_MARGIN
+    assert touch[-1][1] >= lay.centre_x + relief.SUPPORT_MARGIN
+    assert lay.foot[0] - 1.5 < touch[0][0] and touch[-1][1] < lay.foot[1] + 1.5
+
+
+@pytest.mark.parametrize("name", SUPPORTED)
+def test_centre_of_mass_of_the_solid_lies_over_the_support(name):
+    """The same check on the real solid (with the tenon), at the default size."""
+    fig = FIGURES[name]
+    lay = relief.layout(fig)
+    x = relief.standing(relief.make_figure(fig)).center().X
+    assert lay.foot[0] + 2.5 < x < lay.foot[1] - 2.5
+
+
+@pytest.mark.parametrize("height", (80.0, 120.0, 150.0))
+def test_konqi_stands_on_both_feet(height):
+    """Konqi stands on one foot, beside its centre of mass: a post under the raised foot
+    gives a second support, and the tenon reaches under both."""
+    lay = relief.layout(figure("konqi", height=height))
+    assert lay.post is not None
+    assert len(contacts(lay)) == 2
+    alone = relief.layout(figure("konqi", height=height, support=False))
+    assert alone.beside > 0 and alone.post is None
+
+
+@pytest.mark.parametrize("name", ["larry", "kde_logo", "plasma_logo"])
+def test_balanced_figures_get_no_post(name):
+    assert relief.layout(FIGURES[name]).post is None
+
+
+def test_gentoo_logo_is_left_untouched_and_leans_a_little():
+    """A post would change the logo's outline: the "g" leans in the slot instead."""
+    fig = FIGURES["gentoo_logo"]
+    lay = relief.layout(fig)
+    assert not fig.support and lay.post is None and lay.beside > 0
+    assert relief.lean_limit(fig) < 0.75  # degrees: about 1 mm at the top
+    assert relief.layout(replace(fig, support=True)).post is not None  # it would need one
+
+
+BOOT = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60">
+<path d="M0,60 L10,60 L10,20 L48,20 L50,55 L52,20 L60,20 L60,0 L0,0 Z" fill="#000"/></svg>"""
+FLAG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60">
+<path d="M0,60 L4,60 L4,25 L60,25 L60,0 L0,0 Z" fill="#000"/></svg>"""
+
+
+def _shape(tmp_path, text: str, **changes) -> Figure:
+    path = tmp_path / "shape.svg"
+    path.write_text(text, encoding="utf-8")
+    return Figure(name="shape", title="", svg=str(path), bands=("black",), height=60.0,
+                  min_foot=5.0, **changes)
+
+
+def test_post_under_a_point_has_a_minimum_width(tmp_path):
+    """The lowest part beyond the centre of mass is a spike tip: the post under it is
+    still MIN_POST wide, and it is printed (it stays in band 0)."""
+    lay = relief.layout(_shape(tmp_path, BOOT))
+    x0, x1, _ = lay.post
+    assert x1 - x0 >= relief.MIN_POST - 1e-6
+    touch = contacts(lay)
+    assert len(touch) == 2 and touch[1][1] - touch[1][0] >= relief.MIN_POST - 0.1
+
+
+def test_figure_that_cannot_be_supported_is_refused(tmp_path):
+    """A flag on a pole: nothing beyond the centre of mass comes near the ground."""
+    with pytest.raises(ValueError, match="support=False"):
+        relief.layout(_shape(tmp_path, FLAG))
+    lay = relief.layout(_shape(tmp_path, FLAG, support=False))
+    assert lay.post is None and lay.beside > 0
+
+
+@pytest.mark.parametrize("fig", FIGS + [figure("larry", height=60.0),
+                                        figure("plasma_logo", height=150.0)],
+                         ids=IDS + ["larry-60", "plasma_logo-150"])
+def test_assembly_does_not_tip_easily(fig):
+    """Figure and pedestal must tilt at least 25° in every direction before they fall."""
+    st = relief.standing(relief.make_figure(fig))
+    ped = pedestal.make_pedestal(fig)
+    gf, gp = st.volume * STANDEE_DENSITY, ped.volume * PEDESTAL_DENSITY
+    cf, cp = st.center(), ped.center()
+    cx = (gf * cf.X + gp * cp.X) / (gf + gp)
+    cy = (gf * cf.Y + gp * cp.Y) / (gf + gp)
+    cz = (gf * cf.Z + gp * cp.Z) / (gf + gp) + fig.pedestal_h
+    s = pedestal.size(fig)
+    for side, d in (("left", cx - s.x0), ("right", s.x1 - cx), ("front", cy - s.y0),
+                    ("back", s.y1 - cy)):
+        assert math.degrees(math.atan2(d, cz)) >= 25, side

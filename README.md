@@ -31,7 +31,7 @@ The filaments are the ones on the author's shelf (Prusament PETG): black, white,
 
 ```sh
 uv sync
-uv run pytest                     # ~50 s: SVG reading, bands, layers, fit, printability, 3MF, CLI
+uv run pytest                     # ~60 s: SVG reading, bands, layers, fit, printability, 3MF, CLI
 uv run linux3d list               # the figures and their colour bands
 uv run linux3d export             # STL files (out/stl) and 3MF plates (out/3mf)
 uv run linux3d slice              # optional, needs PrusaSlicer: times, M600 check, projects
@@ -53,7 +53,7 @@ uv run linux3d export gentoo_logo --bands violet,grey --set colours=path919=viol
 uv run linux3d slice --material pla                      # slice with Prusament PLA
 ```
 
-Useful parameters: `height`, `bands`, `colours` (SVG element id or colour → filament, e.g. `--set colours=path919=violet,#b8b8b8=drop`), `margin` (border around the drawing), `backing` (`outline`, `hull`, `circle` or `rounded_rect`), `base_t` and `band_t` (band thickness), `min_foot` and `tenon_h`, `pedestal_colour`, `text_colour`, `pedestal_h`, `pedestal_w`, `pedestal_d`, `title`.
+Useful parameters: `height`, `bands`, `support` (a post when the figure would lean, see Stability), `colours` (SVG element id or colour → filament, e.g. `--set colours=path919=violet,#b8b8b8=drop`), `margin` (border around the drawing), `backing` (`outline`, `hull`, `circle` or `rounded_rect`), `base_t` and `band_t` (band thickness), `min_foot` and `tenon_h`, `pedestal_colour`, `text_colour`, `pedestal_h`, `pedestal_w`, `pedestal_d`, `title`.
 
 Thicknesses and heights (`base_t`, `band_t`, `pedestal_h`, `text_h`) must be whole numbers of 0.2 mm layers; the command refuses other values, because the colour change would land one layer late.
 
@@ -72,15 +72,15 @@ There are three kinds of files. Use whichever you like:
 | Plate (3MF) | Colour changes (M600) | Time* | Filament* |
 |---|---|---|---|
 | `gentoo_logo_standee_violet-white` | white at 2.60 mm | 36 min | 19 g |
-| `gentoo_logo_pedestal_violet-white` | white at 14.20 mm | 36 min | 17 g |
+| `gentoo_logo_pedestal_violet-white` | white at 14.20 mm | 42 min | 20 g |
 | `larry_standee_black-white` | white at 2.60 mm | 33 min | 13 g |
-| `larry_pedestal_black-white` | white at 14.20 mm | 32 min | 14 g |
+| `larry_pedestal_black-white` | white at 14.20 mm | 37 min | 17 g |
 | `kde_logo_standee_blue-white` | white at 2.60 mm | 51 min | 28 g |
-| `kde_logo_pedestal_blue-white` | white at 14.20 mm | 43 min | 20 g |
+| `kde_logo_pedestal_blue-white` | white at 14.20 mm | 50 min | 24 g |
 | `plasma_logo_standee_white-black-orange-green-blue` | black 2.60, orange 3.40, green 4.20, blue 5.00 mm | 44 min | 24 g |
-| `plasma_logo_pedestal_black-white` | white at 14.20 mm | 32 min | 14 g |
-| `konqi_standee_black-green-white-red-orange` | green 2.60, white 3.40, red 4.20, orange 5.00 mm | 54 min | 19 g |
-| `konqi_pedestal_black-green` | green at 14.20 mm | 32 min | 15 g |
+| `plasma_logo_pedestal_black-white` | white at 14.20 mm | 37 min | 18 g |
+| `konqi_standee_black-green-white-red-orange` | green 2.60, white 3.40, red 4.20, orange 5.00 mm | 57 min | 20 g |
+| `konqi_pedestal_black-green` | green at 14.20 mm | 51 min | 25 g |
 | `coupon_slot_gauge` | none | 22 min | 7 g |
 
 \* PrusaSlicer 2.9.6 estimates (Prusament PETG, 0.20mm STRUCTURAL), not counting the time for the filament changes.
@@ -94,6 +94,16 @@ The 3MF files already contain them. With the STL files, add them yourself: open 
 - The body is 2.4 mm thick (12 layers). The first colour change comes before the layer that ends at 2.60 mm.
 - Every further band is 0.8 mm thick (4 layers). If a light colour (white above all) looks greyish over the dark one on your first print, make the bands thicker: `--set band_t=1.2` (6 layers).
 - The pedestal is 14 mm high. Its lettering starts with an M600 before the layer that ends at 14.20 mm.
+
+### Stability
+
+The tenon in the slot holds the figure; the pedestal keeps the whole thing on its feet. Two rules keep the figures steady:
+
+- **The centre of mass lies over the foot.** Otherwise the tenon carries the whole weight on one side, and the figure leans in the slot until the tenon meets the wall: by up to 0.7° with the default clearance (about 1 mm at the top). With `support` (on by default), the program computes the centre of mass and, if it lies less than 3 mm inside the foot, adds a post in the body colour under the lowest part beyond it. Konqi stands on one foot in its drawing, so it gets a black post under its raised foot, 7.4 mm high. This works at any `--height`; if no part of the figure comes low enough, `export` stops with an error.
+- **The Gentoo logo is the exception.** The "g" stands on its lower left lobe, 15 mm beside its centre of mass, but a post would change the logo's outline. So it has `support=False` and leans by up to 0.7°. A tighter slot from the slot gauge makes that smaller. `export` prints a note for every figure that gets a post or that leans.
+- **The pedestal is deep, and the figure stands near its middle.** The automatic depth is 45 % of the figure height (more if the lettering needs it), and the figure stands 45 % of the depth from the back edge, also with your own `pedestal_d`. Every assembly must tilt by at least 26° (Plasma) to 38° (Konqi) before it falls over. It still weighs only 30 to 51 g, so a push of 6 to 10 grams-force at the top tips it over backwards.
+
+`tests/test_relief.py` checks the rules for every figure, at heights of 60, 100 and 150 mm.
 
 ### The fit of the tenon
 

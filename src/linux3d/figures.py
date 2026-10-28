@@ -40,7 +40,11 @@ class Figure:
     band_t: float = BAND_T  # every further colour band
     # --- standing up -------------------------------------------------------------------
     min_foot: float = 14.0  # total width of the flat contact at the bottom (mm)
-    ground: float = 0.0  # > 0: a bar of the body colour, this high, under the feet
+    ground: float = 0.0  # > 0: a bar of the body colour, this high (mm), under the feet
+    # when the centre of mass lies beside the foot, add a post of the body colour under
+    # the lowest part beyond it (Konqi's raised foot). False: no post; the figure then
+    # leans in the slot by up to atan(CLR_SLOT / tenon_h), about 0.7°
+    support: bool = True
     max_cut: float = 0.12  # cut at most this fraction of the height to get that foot
     tenon_h: float = 8.0  # how deep the tenon goes into the pedestal
     # --- pedestal (prints standing up) -------------------------------------------------
@@ -48,7 +52,9 @@ class Figure:
     text_colour: str | None = None  # lettering colour (M600); None = same as pedestal
     pedestal_h: float = layers(70)  # 14 mm
     pedestal_w: float = 0.0  # 0 = automatic (wider than the figure's foot)
-    pedestal_d: float = 0.0  # 0 = automatic (a fraction of the height)
+    # 0 = automatic: 45 % of the height, more if the lettering needs it. Either way the
+    # figure stands 45 % of the depth from the back edge (pedestal.BACK_SHARE)
+    pedestal_d: float = 0.0
     text_h: float = layers(3)  # raised lettering on the top face
     text_size: float = 12.0  # largest font size (mm); smaller if it does not fit
 
@@ -75,6 +81,8 @@ class Figure:
             if v and v not in self.bands:
                 raise ValueError(f"{self.name}: {v} is mapped but is not one of the bands; "
                                  "add it to bands or change the map (--set colours=...)")
+        if self.ground < 0:
+            raise ValueError(f"{self.name}: ground must not be negative")
         for key in ("height", "tenon_h", "base_t", "band_t", "pedestal_h", "text_h"):
             if getattr(self, key) <= 0:
                 raise ValueError(f"{self.name}: {key} must be greater than 0")
@@ -105,6 +113,10 @@ FIGURES = {f.name: f for f in [
         # the two shadow shapes and the blurred highlight are below min_opacity
         colours=(("path919", "violet"), ("path2165", "white"), ("path2166", "white"),
                  ("path2167", "violet")),
+        # the "g" stands on its lower left lobe, 14 mm beside its centre of mass. A post
+        # or a plinth would change the logo's outline, which the Gentoo guidelines
+        # forbid: it leans in the slot instead, by 0.7° at most (about 1 mm at the top)
+        support=False,
         text_colour="white", pedestal_colour="violet",
     ),
     Figure(
@@ -131,6 +143,8 @@ FIGURES = {f.name: f for f in [
         colours=(("#b8b8b8", DROP),  # grey shading and the ground shadow
                  ("#49801d", "black"), ("#906119", "black"), ("#905f16", "black"),
                  ("#bbeb8c", "white")),  # the light belly
+        # Konqi stands on one foot, 11 mm beside its centre of mass: `support` puts a
+        # post under the raised foot (6.4 mm up), and the tenon reaches under both feet
         height=120.0, min_foot=10.0, text_colour="green",
     ),
 ]}
