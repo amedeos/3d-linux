@@ -6,6 +6,7 @@ tests/test_layers.py). The sizes of each figure live in `figures.py`.
 """
 
 from math import ceil, pi
+from pathlib import Path
 
 # --- printer / process: Prusa MK4, 0.4 mm nozzle, PrusaSlicer "0.20mm STRUCTURAL" -----
 BED = (250.0, 210.0, 220.0)  # Prusa MK4 print volume
@@ -58,3 +59,12 @@ CLR_SLOT = 0.10  # pedestal slot <-> tenon, per side. 0.10 fitted well in PETG o
 SLOT_GAUGE = (0.05, 0.10, 0.15, 0.20)  # clearances of the four slots of the slot gauge
 SLOT_FLOOR_GAP = 2 * LAYER  # the tenon stops this far above the slot floor
 PEDESTAL_FLOOR = 2.0  # least material under the slot (mm)
+
+# --- ornament: the two halves line up on dowels cut from 1.75 mm filament -------------
+SOCKET_D = 2.0  # blind sockets in the glued face (a 1.75 mm dowel, holes print small)
+SOCKET_DEPTH = layers(3)  # 0.6 mm in each half: the dowel is about 1 mm long
+MIN_ORNAMENT_T = round(SOCKET_DEPTH + 2 * LAYER, 6)  # two whole layers above the sockets
+
+# --- output: one folder per kind of print -------------------------------------------
+OUT = Path("out")
+STANDEES, ORNAMENTS = "standees", "ornaments"

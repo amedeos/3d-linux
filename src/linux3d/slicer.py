@@ -2,12 +2,12 @@
 
 Run `python -m linux3d.export` first, then `python -m linux3d.slicer [--material pla]`.
 
-For every plate in out/3mf it:
+For every plate in out/standees/3mf and out/ornaments/3mf it:
 1. slices the plate with the Prusa MK4 profiles and reports the print time and filament,
    and checks that every M600 is there exactly where the design wants it (plan.json,
    written by export.py) and that nothing needs support
    (a second slice with automatic supports on must create no support at all);
-2. writes a PrusaSlicer project to out/3mf/projects/: the same plate plus the full
+2. writes a PrusaSlicer project to 3mf/projects/: the same plate plus the full
    print configuration, so the MK4 settings and the colour change load with one click.
 
 PrusaSlicer writes its complete configuration at the end of every G-code file, in the
@@ -30,8 +30,9 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from .export import PLAN
+from .export import PLAN, PREVIEW
 from .filaments import DEFAULT_MATERIAL, MATERIALS
+from .params import ORNAMENTS, OUT, STANDEES
 
 PRINTER = "Original Prusa MK4 Input Shaper 0.4 nozzle"
 PRINT = "0.20mm STRUCTURAL @MK4IS 0.4"  # matches params.LAYER / LINE_W
@@ -118,9 +119,9 @@ def make_project(plate: Path, config: str, out: Path) -> None:
         z.writestr(CONFIG_ENTRY, config)
 
 
-def main(folder: Path = Path("out/3mf"), material: str = DEFAULT_MATERIAL) -> int:
+def main(folder: Path = OUT / STANDEES / "3mf", material: str = DEFAULT_MATERIAL) -> int:
     cmd = prusaslicer_command()
-    plates = sorted(p for p in folder.glob("*.3mf") if p.stem != "assembly_preview")
+    plates = sorted(p for p in folder.glob("*.3mf") if p.stem != PREVIEW)
     if not plates or not (folder / PLAN).is_file():
         print(f"no plates in {folder}: run `python -m linux3d.export` first")
         return 1
@@ -161,6 +162,20 @@ def main(folder: Path = Path("out/3mf"), material: str = DEFAULT_MATERIAL) -> in
     return 1 if problems else 0
 
 
+def slice_all(out: Path = OUT, material: str = DEFAULT_MATERIAL) -> int:
+    """Slice the plates of every kind (standees, ornaments) that has been exported."""
+    folders = [out / kind / "3mf" for kind in (STANDEES, ORNAMENTS)]
+    found = [f for f in folders if (f / PLAN).is_file()]
+    if not found:
+        print(f"no plates in {', '.join(map(str, folders))}: run `linux3d export` first")
+        return 1
+    results = []
+    for folder in found:
+        print(f"== {folder}")
+        results.append(main(folder, material))
+    return 1 if any(results) else 0
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     mat = DEFAULT_MATERIAL
@@ -170,4 +185,4 @@ if __name__ == "__main__":
         del args[i:i + 2]
         if mat not in MATERIALS:
             sys.exit(f"unknown material {mat!r}; choose from {', '.join(MATERIALS)}")
-    sys.exit(main(Path(args[0]) if args else Path("out/3mf"), mat))
+    sys.exit(main(Path(args[0]), mat) if args else slice_all(OUT, mat))

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import linux3d
-from linux3d import pedestal, relief
+from linux3d import ornament, pedestal, relief
 
 README = Path(__file__).resolve().parents[1] / "README.md"
 
@@ -28,6 +28,8 @@ def test_readme_examples_work(argv, monkeypatch):
     monkeypatch.setattr("linux3d.export.export_all", lambda out, figs: seen.extend(figs) or {})
     monkeypatch.setattr("linux3d.render.figure_images",
                         lambda fig, out, with_gif=False: seen.append(fig) or [])
+    monkeypatch.setattr("linux3d.render.ornament_images",
+                        lambda fig, out, with_gif=False: seen.append(fig) or [])
     with pytest.raises(SystemExit) as e:
         linux3d.main(argv)
         raise SystemExit(0)
@@ -35,6 +37,7 @@ def test_readme_examples_work(argv, monkeypatch):
     for fig in seen:
         relief.layout(fig)
         pedestal.size(fig)
+        ornament.layout(fig)
 
 
 def test_readme_has_examples():
@@ -46,6 +49,7 @@ def test_readme_has_examples():
     (["export", "larry", "--height"], "--height needs a value"),
     (["export", "larry", "--set", "margin"], "KEY=VALUE"),
     (["export", "larry", "--set", "band_t=0.7"], "layers"),
+    (["export", "larry", "--set", "ornament_t=0.8"], "dowel sockets"),
     (["export", "gentoo_logo", "--bands", "violet,grey"], "change the map"),
     (["export", "nobody"], "unknown figure"),
 ])

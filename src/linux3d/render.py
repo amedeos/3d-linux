@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image
 
 from .filaments import rgb
+from .params import ORNAMENTS, OUT, STANDEES
 
 
 def _rgb(color) -> np.ndarray:
@@ -144,8 +145,9 @@ def render(items, path, elev=28.0, azim=-60.0, zoom=1.0, size=(900, 700), ss=2,
     Image.fromarray(out).resize(size, Image.LANCZOS).save(path)
 
 
-def gif(frames_items, path, duration=80, per_frame=None, **kw):
-    """Render an iterable of item lists into an animated GIF that plays forth and back.
+def gif(frames_items, path, duration=80, per_frame=None, bounce=True, **kw):
+    """Render an iterable of item lists into an animated GIF that plays forth and back
+    (bounce=False: it only plays forth, for a full turn).
 
     per_frame: optional list of extra render() arguments, one dict per frame (camera moves).
     """
@@ -159,7 +161,7 @@ def gif(frames_items, path, duration=80, per_frame=None, **kw):
         for k, (items, tmp) in enumerate(zip(frames, tmp_paths)):
             render(items, tmp, **kw, **(per_frame[k] if per_frame else {}))
             images.append(Image.open(tmp).convert("P", palette=Image.ADAPTIVE))
-        seq = images + images[-2:0:-1]
+        seq = images + images[-2:0:-1] if bounce else images
         seq[0].save(path, save_all=True, append_images=seq[1:], duration=duration, loop=0)
     finally:
         for tmp in tmp_paths:
@@ -206,15 +208,16 @@ def mask(geom, bounds, px_per_mm: float, pad: int = 10) -> Image.Image:
     return out
 
 
-def flat_preview(fig, path: Path, px_per_mm: float = 8.0) -> Path:
-    """The standee seen from the front in 2D, one colour per band: check the colour map."""
+def flat_preview(fig, path: Path, px_per_mm: float = 8.0, bands=None) -> Path:
+    """The standee (or other bands of the figure, e.g. an ornament's) seen from the front
+    in 2D, one colour per band: check the colour map."""
     from .filaments import FILAMENTS
     from .relief import layout
 
-    lay = layout(fig)
-    bounds = lay.bands[0].bounds
+    bands = layout(fig).bands if bands is None else bands
+    bounds = bands[0].bounds
     img = None
-    for band, name in zip(lay.bands, fig.bands):
+    for band, name in zip(bands, fig.bands):
         m = mask(band, bounds, px_per_mm)
         if img is None:
             img = Image.new("RGB", m.size, (214, 222, 230))
@@ -242,12 +245,47 @@ def figure_images(fig, out: Path, with_gif: bool = False) -> list[Path]:
     return paths
 
 
+def ornament_images(fig, out: Path, with_gif: bool = False) -> list[Path]:
+    """Every image of one ornament: hanging (from the front and from the back), flat, and
+    both halves lying on the plate."""
+    from build123d import Pos
+
+    from . import ornament
+
+    out.mkdir(parents=True, exist_ok=True)
+    lay = ornament.layout(fig)
+    paths = [out / f"{fig.name}.png", out / f"{fig.name}_back.png", out / f"{fig.name}_print.png",
+             flat_preview(fig, out / f"{fig.name}_flat.png", bands=lay.bands)]
+    items = ornament.coloured(fig)  # once: both halves, turned over and hung up
+    render(items, paths[0], size=(800, 900), **FRONT)
+    render(items, paths[1], size=(800, 900), **{**FRONT, "azim": FRONT["azim"] + 180})
+    # the plate: the front half on the left, the mirrored back half on the right
+    shift = max(abs(v) for v in lay.bands[0].bounds[::2]) + 4.0
+    plate = [(Pos(-shift, 0, 0) * p, f) for p, f in zip(ornament.band_parts(fig), fig.bands)]
+    plate += [(Pos(shift, 0, 0) * p, f)
+              for p, f in zip(ornament.band_parts(fig, back=True), fig.bands)]
+    render(plate, paths[2], size=(1000, 700), **FLAT)
+    if with_gif:  # one full turn: the front, the edge, the back
+        paths.append(out / f"{fig.name}.gif")
+        turn = [{"elev": 14, "azim": -90 + a} for a in range(0, 360, 15)]
+        gif((items for _ in turn), paths[-1], size=(500, 560), zoom=1.25, per_frame=turn,
+            bounce=False)
+    return paths
+
+
+def all_images(fig, out: Path = OUT, with_gif: bool = False) -> list[Path]:
+    """The standee's images into out/standees/render, the ornament's into
+    out/ornaments/render."""
+    return (figure_images(fig, out / STANDEES / "render", with_gif)
+            + ornament_images(fig, out / ORNAMENTS / "render", with_gif))
+
+
 def main(argv: list[str]) -> None:
     from .figures import FIGURES
 
     args = [a for a in argv if not a.startswith("--")]
     for name in args or list(FIGURES):
-        for path in figure_images(FIGURES[name], Path("out/render"), with_gif="--gif" in argv):
+        for path in all_images(FIGURES[name], with_gif="--gif" in argv):
             print("wrote", path)
 
 

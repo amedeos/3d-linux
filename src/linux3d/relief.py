@@ -90,10 +90,16 @@ def _clean(geom: BaseGeometry) -> BaseGeometry:
 
 
 def opening(geom: BaseGeometry, r: float) -> BaseGeometry:
-    """Remove every part thinner than 2 r (morphological opening)."""
+    """Remove every part thinner than 2 r (morphological opening).
+
+    GEOS can, rarely, return a buffer whose rings cross (Konqi at 145 mm), and the next
+    boolean then fails. Such a result is repaired: overlapping shells are joined.
+    """
     if geom.is_empty:
         return geom
-    return geom.buffer(-r, join_style="round").buffer(r, join_style="round")
+    out = geom.buffer(-r, join_style="round").buffer(r, join_style="round")
+    return out if out.is_valid else shapely.make_valid(out, method="structure",
+                                                       keep_collapsed=False)
 
 
 def drawing(fig: Figure) -> dict[str, BaseGeometry]:
@@ -180,11 +186,17 @@ def _foot(fig: Figure, body: Polygon) -> tuple[float, tuple[float, float]]:
     return best[0], best[1]
 
 
-def centre_x(bands: list[BaseGeometry], z: list[tuple[float, float]]) -> float:
-    """x of the centre of mass of stacked bands (area times thickness)."""
-    weights = [(b.area * (z1 - z0), b.centroid.x) for b, (z0, z1) in zip(bands, z)
+def centre(bands: list[BaseGeometry], z: list[tuple[float, float]]) -> tuple[float, float]:
+    """x and y of the centre of mass of stacked bands (area times thickness)."""
+    weights = [(b.area * (z1 - z0), b.centroid) for b, (z0, z1) in zip(bands, z)
                if not b.is_empty]
-    return sum(w * x for w, x in weights) / sum(w for w, _ in weights)
+    total = sum(w for w, _ in weights)
+    return (sum(w * c.x for w, c in weights) / total, sum(w * c.y for w, c in weights) / total)
+
+
+def centre_x(bands: list[BaseGeometry], z: list[tuple[float, float]]) -> float:
+    """x of the centre of mass of stacked bands."""
+    return centre(bands, z)[0]
 
 
 def _post(fig: Figure, body: Polygon, foot: tuple[float, float],
@@ -233,9 +245,8 @@ def _thin(geom: BaseGeometry, r: float) -> BaseGeometry:
     return geom.difference(opening(geom, r)) if not geom.is_empty else geom
 
 
-@cache
-def layout(fig: Figure) -> Layout:
-    fig.validate()
+def artwork(fig: Figure) -> tuple[dict[str, BaseGeometry], Polygon]:
+    """The colour regions and the body (drawing + backing), scaled, y up, not cut."""
     regions = drawing(fig)
     art = unary_union(list(regions.values()))
     if fig.background:
@@ -245,21 +256,13 @@ def layout(fig: Figure) -> Layout:
             regions[fig.background] = unary_union([regions.get(fig.background, Polygon()),
                                                    holes])
         art = filled
-    body = _backing(fig, art)
-    if fig.ground > 0:  # a bar under everything within `ground` of the bottom
-        x0, y0, x1, _ = body.bounds
-        gx0, _, gx1, _ = body.intersection(box(x0, y0, x1, y0 + fig.ground)).bounds
-        body = _with_bar(body, gx0, gx1, y0, y0 + fig.ground)
-    cut, foot = _foot(fig, body)
-    y_cut = body.bounds[1] + cut
+    return regions, _backing(fig, art)
 
-    def shift(g: BaseGeometry) -> BaseGeometry:
-        return affinity.translate(g, 0, -y_cut)
 
-    above = box(-1e4, y_cut, 1e4, 1e4)
-    body = shift(body.intersection(above))
-    regions = {f: shift(g.intersection(above)) for f, g in regions.items()}
-
+def colour_bands(fig: Figure, body: BaseGeometry,
+                 regions: dict[str, BaseGeometry]) -> list[BaseGeometry]:
+    """The printable footprint of every band over a body: nested, with raised parts at least
+    MIN_STROKE wide and grooves at least MIN_GAP wide."""
     bands = [opening(body, P.MIN_STROKE / 2)]
     for k in range(1, len(fig.bands)):
         wanted = unary_union([regions[f] for f in fig.bands[k:] if f in regions])
@@ -285,6 +288,27 @@ def layout(fig: Figure) -> Layout:
             raise ValueError(f"{fig.name}: band {k} ({fig.bands[k]}) is empty; "
                              "remove it from bands or map some colour to it")
         bands.append(fk)
+    return bands
+
+
+@cache
+def layout(fig: Figure) -> Layout:
+    fig.validate()
+    regions, body = artwork(fig)
+    if fig.ground > 0:  # a bar under everything within `ground` of the bottom
+        x0, y0, x1, _ = body.bounds
+        gx0, _, gx1, _ = body.intersection(box(x0, y0, x1, y0 + fig.ground)).bounds
+        body = _with_bar(body, gx0, gx1, y0, y0 + fig.ground)
+    cut, foot = _foot(fig, body)
+    y_cut = body.bounds[1] + cut
+
+    def shift(g: BaseGeometry) -> BaseGeometry:
+        return affinity.translate(g, 0, -y_cut)
+
+    above = box(-1e4, y_cut, 1e4, 1e4)
+    body = shift(body.intersection(above))
+    regions = {f: shift(g.intersection(above)) for f, g in regions.items()}
+    bands = colour_bands(fig, body, regions)
     # stand steady: a post (body colour, band 0 only) when the centre of mass lies
     # beside the foot. It changes no colour band, so the bands need no second pass.
     com = centre_x(bands, band_z(fig))
@@ -359,14 +383,18 @@ def band_parts(fig: Figure) -> tuple[Part, ...]:
     return tuple(slab(g, z0, z1) for g, (z0, z1) in zip(lay.bands, band_z(fig)))
 
 
-@cache
-def make_figure(fig: Figure) -> Part:
-    """The whole standee in the print pose: front face up, the tenon towards -y."""
-    parts = band_parts(fig)
-    part = Pos() * parts[0]  # a copy: clean() works in place, and parts[0] is cached
+def fuse(parts) -> Part:
+    """One solid from stacked parts. The parts may be cached: they are not changed."""
+    part = Pos() * parts[0]  # a copy: clean() works in place, and parts[0] may be cached
     for p in parts[1:]:
         part = part + p
     return part.clean()
+
+
+@cache
+def make_figure(fig: Figure) -> Part:
+    """The whole standee in the print pose: front face up, the tenon towards -y."""
+    return fuse(band_parts(fig))
 
 
 def standing(part: Part) -> Part:

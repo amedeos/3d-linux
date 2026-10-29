@@ -1,16 +1,17 @@
-"""Parametric Linux logos and mascots, printed as layered-colour standees on pedestals."""
+"""Parametric Linux logos and mascots, printed as layered-colour standees on pedestals and
+as Christmas tree ornaments."""
 
 USAGE = """\
 usage: linux3d COMMAND [FIGURE ...] [options]
 
 commands:
   list      the figures and their colour bands
-  export    STL files (out/stl) and 3MF plates (out/3mf); exit 1 on problems
-  slice     slice out/3mf with the PrusaSlicer CLI: times, M600 check, projects
-  render    PNG previews in out/render (add --gif for a turning GIF)
+  export    STL files and 3MF plates in out/standees and out/ornaments; exit 1 on problems
+  slice     slice the 3MF plates with the PrusaSlicer CLI: times, M600 check, projects
+  render    PNG previews in out/standees/render and out/ornaments/render (--gif: a GIF too)
 
 options (for export and render; they change every FIGURE given, or all of them):
-  --height MM            height of the drawing
+  --height MM            height of the standee's drawing (ornament: --set ornament_h=MM)
   --bands A,B,...        filaments from the bed up, e.g. --bands black,white
   --set KEY=VALUE        any parameter of figures.Figure, e.g. --set margin=2
   --material petg|pla    filament profile for slice (default petg)
@@ -19,6 +20,7 @@ examples:
   uv run linux3d export gentoo_logo larry
   uv run linux3d export larry --height 120 --set text_colour=none
   uv run linux3d render konqi --bands black,green,white,red,gold
+  uv run linux3d export larry --set ornament_h=80
 """
 
 
@@ -42,7 +44,6 @@ def _fail(message: str) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     import sys
-    from pathlib import Path
 
     from .filaments import MATERIALS
 
@@ -85,24 +86,26 @@ def main(argv: list[str] | None = None) -> None:
         for f in FIGURES.values():
             print(f"{f.name:12s} {f.height:5.0f} mm  {' -> '.join(f.bands):40s} "
                   f"pedestal {f.pedestal_colour}"
-                  + (f", lettering {f.text_colour}" if f.text_colour else ""))
+                  + (f", lettering {f.text_colour}" if f.text_colour else "")
+                  + f"; ornament {f.ornament_h:.0f} mm")
     elif command == "export":
         from .export import export_all
+        from .params import OUT
 
         try:
-            report = export_all(Path("out"), figs)
+            report = export_all(OUT, figs)
         except ValueError as e:  # e.g. a figure that cannot stand
             _fail(str(e))
         sys.exit(1 if any(report.values()) else 0)
     elif command == "slice":
-        from .slicer import main as slice_main
+        from .slicer import slice_all
 
-        sys.exit(slice_main(Path("out/3mf"), material))
+        sys.exit(slice_all(material=material))
     elif command == "render":
-        from .render import figure_images
+        from .render import all_images
 
         for fig in figs:
-            for path in figure_images(fig, Path("out/render"), with_gif="--gif" in flags):
+            for path in all_images(fig, with_gif="--gif" in flags):
                 print("wrote", path)
     else:
         print(f"unknown command {command!r}\n\n{USAGE}")

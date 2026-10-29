@@ -6,6 +6,9 @@ switches to the next filament for the next band. A region of colour k is raised 
 top of band k, so from the front you see its colour. A tenon under the figure plugs
 into a pedestal, which prints standing up.
 
+The same drawing and bands also make a Christmas tree ornament (ornament.py), at its own
+size `ornament_h`.
+
 The drawing only ever scales uniformly (the Gentoo logo guidelines forbid any
 distortion), so `height` alone sets the size.
 """
@@ -57,6 +60,10 @@ class Figure:
     pedestal_d: float = 0.0
     text_h: float = layers(3)  # raised lettering on the top face
     text_size: float = 12.0  # largest font size (mm); smaller if it does not fit
+    # --- Christmas tree ornament (ornament.py): two halves, glued back to back --------
+    ornament_h: float = 70.0  # height of the drawing (mm); the hanging tab comes on top
+    ornament_t: float = layers(6)  # body (band 0) of each half; the colour bands keep band_t
+    hole_d: float = 4.0  # hanging hole, for a hook or a ribbon
 
     @property
     def svg_path(self) -> Path:
@@ -83,12 +90,13 @@ class Figure:
                                  "add it to bands or change the map (--set colours=...)")
         if self.ground < 0:
             raise ValueError(f"{self.name}: ground must not be negative")
-        for key in ("height", "tenon_h", "base_t", "band_t", "pedestal_h", "text_h"):
+        for key in ("height", "tenon_h", "base_t", "band_t", "pedestal_h", "text_h",
+                    "ornament_h", "ornament_t", "hole_d"):
             if getattr(self, key) <= 0:
                 raise ValueError(f"{self.name}: {key} must be greater than 0")
         # every band, the pedestal top and the lettering must end on a layer boundary, or
         # the M600 lands one layer late and the slicer rounds the faces away
-        for key in ("base_t", "band_t", "pedestal_h", "text_h"):
+        for key in ("base_t", "band_t", "pedestal_h", "text_h", "ornament_t"):
             if not P.on_grid(getattr(self, key)):
                 raise ValueError(f"{self.name}: {key} = {getattr(self, key)} is not a whole "
                                  f"number of {P.LAYER} mm layers")
@@ -99,6 +107,9 @@ class Figure:
             raise ValueError(f"{self.name}: the slot ({slot} mm) is too deep for a "
                              f"{self.pedestal_h} mm pedestal: make pedestal_h at least "
                              f"{P.snap_up(slot + P.PEDESTAL_FLOOR)} or tenon_h smaller")
+        if self.ornament_t < P.MIN_ORNAMENT_T - 1e-9:
+            raise ValueError(f"{self.name}: ornament_t = {self.ornament_t} leaves too little "
+                             f"above the dowel sockets; use at least {P.MIN_ORNAMENT_T}")
         if self.backing not in ("outline", "hull", "circle", "rounded_rect"):
             raise ValueError(f"{self.name}: unknown backing {self.backing!r}")
         if not self.svg_path.is_file():
