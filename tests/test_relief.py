@@ -6,6 +6,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 import shapely
+from conftest import KINDS, layout_of, view_of
 from shapely.geometry import Point, Polygon
 from shapely.ops import unary_union
 
@@ -38,17 +39,20 @@ def test_colour_map_matches_the_drawing(fig):
     assert [k for k, _ in fig.colours if k not in keys] == []
 
 
+@pytest.mark.parametrize("kind", KINDS)
 @pytest.mark.parametrize("fig", FIGS, ids=IDS)
-def test_every_band_shows(fig):
-    lay = relief.layout(fig)
+def test_every_band_shows(fig, kind):
+    lay = layout_of(kind, fig)
     assert len(lay.bands) == len(fig.bands)
     assert all(b.area > 20 for b in lay.bands)
     assert set(lay.regions) <= set(fig.bands)
 
 
+@pytest.mark.parametrize("kind", KINDS)
 @pytest.mark.parametrize("fig", FIGS, ids=IDS)
-def test_scale_is_uniform(fig):
+def test_scale_is_uniform(fig, kind):
     """The drawing keeps its proportions (Gentoo's logo guidelines forbid distortion)."""
+    fig = view_of(kind, fig)
     cmap = fig.colour_map()
     kept = [s for s in relief._shapes(fig.svg_path)
             if cmap.get(s.key, cmap.get(s.colour)) != DROP
@@ -61,9 +65,10 @@ def test_scale_is_uniform(fig):
     assert (ax1 - ax0) / (ay1 - ay0) == pytest.approx((x1 - x0) / (y1 - y0), rel=1e-3)
 
 
+@pytest.mark.parametrize("kind", KINDS)
 @pytest.mark.parametrize("fig", FIGS, ids=IDS)
-def test_bands_are_nested(fig):
-    assert relief.is_nested(relief.layout(fig))
+def test_bands_are_nested(fig, kind):
+    assert relief.is_nested(layout_of(kind, fig))
 
 
 @pytest.mark.parametrize("fig", FIGS, ids=IDS)
@@ -198,13 +203,15 @@ def test_single_band_figure_does_not_change_the_cached_band():
 
 
 @pytest.mark.parametrize("key, value", [("band_t", 0.7), ("base_t", 2.5),
-                                        ("pedestal_h", 13.9), ("text_h", 0.5)])
+                                        ("pedestal_h", 13.9), ("text_h", 0.5),
+                                        ("ornament_t", 1.1)])
 def test_off_grid_thickness_is_refused(key, value):
     with pytest.raises(ValueError, match="layers"):
         figure("konqi", **{key: value})
 
 
-@pytest.mark.parametrize("changes", [{"bands": ()}, {"height": 0.0}, {"margin": -1.0}])
+@pytest.mark.parametrize("changes", [{"bands": ()}, {"height": 0.0}, {"margin": -1.0},
+                                     {"ornament_h": 0.0}, {"hole_d": -1.0}])
 def test_bad_sizes_are_refused(changes):
     with pytest.raises(ValueError):
         figure("larry", **changes)

@@ -5,21 +5,23 @@ from itertools import combinations
 
 import pytest
 
-from linux3d import pedestal, relief
+from linux3d import ornament, pedestal, relief
 from linux3d.export import (
     BED,
     PLAN,
     export_all,
     m600_metadata,
+    ornament_plates,
     planned_changes,
     plates,
     write_3mf,
 )
 from linux3d.figures import FIGURES, figure
+from linux3d.params import ORNAMENTS, STANDEES
 from linux3d.slicer import CONFIG_ENTRY, M600_ENTRY, config_from_gcode, make_project
 
 FIGS = list(FIGURES.values())
-PLATES = plates(FIGS)
+PLATES = plates(FIGS) | ornament_plates(FIGS)
 
 
 @pytest.mark.parametrize("name", list(PLATES))
@@ -31,6 +33,13 @@ def test_plate_fits_the_bed_without_overlaps(name):
         assert bb.max.X <= BED[0] and bb.max.Y <= BED[1] and bb.max.Z <= BED[2]
     for a, b in combinations(boxes, 2):
         assert a.max.X < b.min.X or b.max.X < a.min.X or a.max.Y < b.min.Y or b.max.Y < a.min.Y
+
+
+def test_ornament_halves_too_wide_for_the_bed_are_an_error():
+    """At 110 mm, Plasma's two halves are 265 mm wide side by side: export must stop, not
+    write a plate that hangs over the edge of the bed (checked before any solid is built)."""
+    with pytest.raises(ValueError, match="do not fit side by side"):
+        ornament_plates([figure("plasma_logo", ornament_h=110.0)])
 
 
 @pytest.mark.parametrize("name", list(PLATES))
@@ -56,6 +65,18 @@ def test_one_schedule_per_plate():
     assert PLATES["coupon_slot_gauge"][1] == []
 
 
+def test_one_plate_per_ornament():
+    # both halves on one plate: they have the same colour changes
+    for fig in FIGS:
+        names = [p for p in PLATES if p.startswith(f"{fig.name}_ornament")]
+        assert len(names) == 1
+        objects, changes = PLATES[names[0]]
+        assert [n for n, _, _ in objects] == [f"{fig.name} ornament front",
+                                              f"{fig.name} ornament back"]
+        assert changes == ornament.colour_changes(fig)
+        assert changes == relief.colour_changes(ornament.as_ornament(fig))
+
+
 def test_m600_metadata_lists_every_change():
     xml = m600_metadata([(2.6, "white"), (3.4, "red")])
     assert re.findall(r'print_z="([\d.]+)"', xml) == ["2.60", "3.40"]
@@ -65,7 +86,8 @@ def test_m600_metadata_lists_every_change():
 
 
 @pytest.mark.parametrize("name", ["konqi_standee_black-green-white-red-orange",
-                                  "gentoo_logo_pedestal_violet-white", "coupon_slot_gauge"])
+                                  "gentoo_logo_pedestal_violet-white", "coupon_slot_gauge",
+                                  "plasma_logo_ornament_white-black-orange-green-blue"])
 def test_3mf_content(tmp_path, name):
     objects, changes = PLATES[name]
     path = tmp_path / f"{name}.3mf"
@@ -82,17 +104,26 @@ def test_3mf_content(tmp_path, name):
 
 
 def test_plan_is_merged_across_exports(tmp_path):
-    """Exporting one figure keeps the plates of the figures exported before."""
-    plan_path = tmp_path / "3mf" / PLAN
+    """Exporting one figure keeps the plates of the figures exported before. Standees and
+    ornaments go into their own folders, each with its own plan."""
+    plan_path = tmp_path / STANDEES / "3mf" / PLAN
     plan_path.parent.mkdir(parents=True)
     plan_path.write_text(json.dumps({"earlier_plate": [[2.6, "white"]]}), encoding="utf-8")
-    small = figure("larry", height=40.0, title="")
+    small = figure("larry", height=40.0, title="", ornament_h=40.0)
     export_all(tmp_path, [small], coupon=False)
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     assert plan["earlier_plate"] == [[2.6, "white"]]
     for name, changes in planned_changes(plates([small], coupon=False)).items():
         assert plan[name] == changes
-    assert (tmp_path / "3mf" / "larry_standee_black-white.3mf").is_file()
+    assert (tmp_path / STANDEES / "3mf" / "larry_standee_black-white.3mf").is_file()
+    assert (tmp_path / STANDEES / "stl" / "larry_pedestal.stl").is_file()
+    folder = tmp_path / ORNAMENTS
+    plan = json.loads((folder / "3mf" / PLAN).read_text(encoding="utf-8"))
+    assert plan == planned_changes(ornament_plates([small]))
+    assert (folder / "3mf" / "larry_ornament_black-white.3mf").is_file()
+    assert (folder / "3mf" / "assembly_preview.3mf").is_file()
+    assert {p.name for p in (folder / "stl").iterdir()} == {"larry_ornament_front.stl",
+                                                            "larry_ornament_back.stl"}
 
 
 def test_export_builds_plates_and_coupon_once(tmp_path, monkeypatch):
@@ -114,7 +145,8 @@ def test_export_builds_plates_and_coupon_once(tmp_path, monkeypatch):
     monkeypatch.setattr(coupon, "gauge_block", counted_gauge)
     coupon._coupon_parts.cache_clear()
     try:
-        export_all(tmp_path, [figure("larry", height=40.0, title="")], coupon=True)
+        export_all(tmp_path, [figure("larry", height=40.0, title="", ornament_h=40.0)],
+                   coupon=True)
     finally:
         coupon._coupon_parts.cache_clear()  # do not keep the counting wrapper's result
     assert calls == {"plates": 1, "gauge": 1}

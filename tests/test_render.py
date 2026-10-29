@@ -48,3 +48,16 @@ def test_figure_images_builds_the_scene_once(tmp_path, monkeypatch):
     paths = render.figure_images(FIGURES["larry"], tmp_path, with_gif=True)
     assert calls == {"scene": 1, "coloured": 1}
     assert (tmp_path / "larry_flat.png").is_file() and len(paths) == 5
+
+
+def test_ornament_images_turn_all_the_way_round(tmp_path, monkeypatch):
+    """The ornament's GIF is one full turn (front, edge, back): it must not play back."""
+    calls = []
+    monkeypatch.setattr(render, "render", lambda *a, **k: None)
+    monkeypatch.setattr(render, "gif", lambda frames, *a, **k: calls.append((list(frames), k)))
+    paths = render.ornament_images(FIGURES["kde_logo"], tmp_path, with_gif=True)
+    assert (tmp_path / "kde_logo_flat.png").is_file() and len(paths) == 5
+    (frames, kw), = calls
+    assert kw["bounce"] is False
+    angles = [f["azim"] for f in kw["per_frame"]]
+    assert max(angles) - min(angles) >= 330 and len(frames) == len(angles)

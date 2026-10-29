@@ -4,7 +4,7 @@ Guidance for coding agents working in this repository.
 
 ## Project
 
-Parametric, printable Linux logos and mascots: the Gentoo "g" logo, Larry the Cow, the KDE logo, the Plasma logo and Konqi. Each one is a **standee** in colour bands, with a tenon that plugs into a **pedestal**. It follows the same approach as the owner's earlier project `/workspace/3d-halloween-2026` (Nosferatu's Coffin), from which `params.py`, `export.py`, `slicer.py` and `render.py` come.
+Parametric, printable Linux logos and mascots: the Gentoo "g" logo, Larry the Cow, the KDE logo, the Plasma logo and Konqi. Each one is a **standee** in colour bands, with a tenon that plugs into a **pedestal**, and a **Christmas tree ornament** (two halves in the same colour bands, glued back to back). It follows the same approach as the owner's earlier project `/workspace/3d-halloween-2026` (Nosferatu's Coffin), from which `params.py`, `export.py`, `slicer.py` and `render.py` come.
 
 - **Printer:** Prusa MK4 (Input Shaper firmware) with **one extruder**: no MMU, no INDX. Colours come only from M600 colour changes by layer height, or from separate parts.
 - **Slicer profile:** PrusaSlicer "Original Prusa MK4 Input Shaper 0.4 nozzle", "0.20mm STRUCTURAL @MK4IS 0.4", "Prusament PETG @PGIS". 0.2 mm layers (first layer too), 0.45 mm lines.
@@ -23,7 +23,7 @@ Parametric, printable Linux logos and mascots: the Gentoo "g" logo, Larry the Co
 
 ```sh
 uv sync
-uv run pytest                  # ~60 s
+uv run pytest                  # ~140 s
 uv run linux3d list
 uv run linux3d export [FIGURE ...] [--height MM] [--bands a,b] [--set key=value]
 uv run linux3d slice [--material pla]   # optional, PrusaSlicer CLI
@@ -31,22 +31,24 @@ uv run linux3d render [FIGURE ...] [--gif]
 ```
 
 - The modules also run on their own: `python -m linux3d.export|slicer|render`.
+- The output has one folder per kind: `out/standees/` (standees, pedestals, slot gauge) and `out/ornaments/`, each with `stl/`, `3mf/` (plates, `plan.json`, `assembly_preview.3mf`), `3mf/projects/` and `render/`. `export_all`, `slice_all` and `render.all_images` handle both; the folder names are `params.OUT`, `STANDEES` and `ORNAMENTS`.
 - PrusaSlicer may have no data directory on a headless machine ("Configuration wasn't found"). Make a folder with `vendor/PrusaResearch.ini` (copied from `/usr/share/PrusaSlicer/profiles/`) and a `PrusaSlicer.ini` with `[presets]` (the three profile names) and `[vendor:PrusaResearch]` / `model:MK4IS = 0.4`, then run `PRUSA_SLICER="prusa-slicer --datadir <folder>" uv run linux3d slice`.
 
 ## Layout
 
 | File | Role |
 |---|---|
-| `src/linux3d/params.py` | Printer grid (`LAYER`, `LINE_W`, `lines()`, `layers()`, `layer_top()`, `snap_up()`), `BASE_T`, `BAND_T`, the slot clearance `CLR_SLOT` |
+| `src/linux3d/params.py` | Printer grid (`LAYER`, `LINE_W`, `lines()`, `layers()`, `layer_top()`, `snap_up()`), `BASE_T`, `BAND_T`, the slot clearance `CLR_SLOT`, the ornament's dowel sockets, the output folders |
 | `filaments.py` | The owner's filaments (name → hex), nearest-colour mapping in CIELAB, PrusaSlicer material profiles |
-| `figures.py` | `Figure` (frozen dataclass): every parameter of a figure and its pedestal. `FIGURES` is the registry; `figure(name, **overrides)` validates (filaments, whole layers, slot depth) |
+| `figures.py` | `Figure` (frozen dataclass): every parameter of a figure, its pedestal and its ornament. `FIGURES` is the registry; `figure(name, **overrides)` validates (filaments, whole layers, slot depth) |
 | `svg.py` | SVG → painted shapes (shapely): transforms, curves, fill rules (exact, with winding numbers), strokes, gradients (average colour), opacity multiplied down the group tree, `visible()` (painter's algorithm) |
-| `relief.py` | Figure → colour regions → body, foot, tenon → printable bands → build123d solids; the M600 list |
+| `relief.py` | Figure → colour regions and body (`artwork`) → printable bands (`colour_bands`) → foot, post, tenon (`layout`) → build123d solids; the M600 list |
+| `ornament.py` | Ornament: the same bands at `ornament_h`, a hanging tab above the centre of mass, dowel sockets, front and back halves |
 | `pedestal.py` | Pedestal with slot, 45° top chamfer and raised lettering (bundled Noto Sans Bold) |
 | `coupon.py` | Slot gauge: four slots (`SLOT_GAUGE`) and a test tenon |
-| `export.py` | STL export with checks; 3MF plates (one per print job, named and coloured, M600s as PrusaSlicer metadata); `plan.json`; assembly preview |
+| `export.py` | STL export with checks; 3MF plates (one per print job, named and coloured, M600s as PrusaSlicer metadata); `plan.json`; assembly preview; one folder per kind |
 | `slicer.py` | Optional PrusaSlicer CLI run: time and filament, M600 check against `plan.json`, a second slice with automatic supports that must create none, project 3MFs with the full config |
-| `render.py` | numpy z-buffer renderer (no OpenGL); `flat_preview()` shows the bands in 2D; `mask()` rasterises a geometry (also used by the tests) |
+| `render.py` | numpy z-buffer renderer (no OpenGL); `figure_images()` and `ornament_images()`, both through `all_images()`; `flat_preview()` shows the bands in 2D; `mask()` rasterises a geometry (also used by the tests) |
 | `__init__.py` | The `linux3d` command |
 | `assets/` | The SVG artwork with `ATTRIBUTION.md` files. Never edit the SVGs; map colours in `figures.py` |
 | `tests/` | pytest suite. Keep it green. |
@@ -55,24 +57,32 @@ uv run linux3d render [FIGURE ...] [--gif]
 
 - **Bands.** `bands[0]` prints the whole body. Band k (k ≥ 1) covers every region whose colour is band k or higher, so the bands are nested by construction: nothing hangs in the air. A region of a lower colour (Larry's black spots, Gentoo's eye) stays at the top of its own band and looks like a pit.
 - **M600.** Band k starts at `base_t + (k - 1) * band_t`. Its M600 is at `layer_top()` of that height.
-- **Colour map.** `Figure.colours` maps an SVG element id (`path919`, `path919:stroke`, or `#n` for elements without id) or a colour (`#b8b8b8`) to a filament or to `DROP`. Everything else takes the nearest band colour. Shapes more transparent than `min_opacity` are shading and are left out, unless the map names them. Check every change on `out/render/<name>_flat.png`.
+- **Colour map.** `Figure.colours` maps an SVG element id (`path919`, `path919:stroke`, or `#n` for elements without id) or a colour (`#b8b8b8`) to a filament or to `DROP`. Everything else takes the nearest band colour. Shapes more transparent than `min_opacity` are shading and are left out, unless the map names them. Check every change on `out/standees/render/<name>_flat.png` and `out/ornaments/render/<name>_flat.png`.
 - **Body.** `backing="outline"` grows the drawing by `margin`. If the drawing falls apart into pieces (Plasma's dots), use `hull`, `circle` or `rounded_rect`. `background` fills holes inside the drawing, for drawings that rely on white paper.
 - **Foot and tenon.** The body is cut flat at the bottom until the contact is `min_foot` wide (at most `max_cut` of the height). `ground` (mm) adds a bar under the feet instead. With `support`, `layout()` adds a post (see Stability). The tenon spans every contact, is `base_t` thick and `tenon_h` long.
 - **Stability.** The tenon in the slot holds the figure, not the foot. If the centre of mass lies beside the foot, the figure pivots on the foot edge until the tenon meets one slot wall: `lean_limit()` = atan(CLR_SLOT / tenon_h) = 0.7°. So `layout()` computes the centre of mass (`centre_x`: band areas times thickness) and, with `support`, adds a post (`_post`) under the lowest part beyond it, at least `MIN_POST` wide and at most `MAX_POST` of the height tall, until the centre of mass lies `SUPPORT_MARGIN` (3 mm) inside. It never uses fixed millimetres, so it works at any height (an earlier fixed-mm version silently stopped working with `--height`). If no part is low enough, it raises an error. Konqi gets a post under its raised foot (6.4 mm up). The Gentoo logo has `support=False` (a post would change the logo's outline) and leans by up to 0.7°; `export` prints a note for posts and leans.
 - **Tipping.** The light assembly (30-51 g) tips over backwards first. The pedestal is 45 % of the figure height deep (`DEPTH_SHARE`, more if the lettering needs `TEXT_ROOM`), and the figure stands 45 % of the depth from the back edge (`BACK_SHARE`), with an explicit `pedestal_d` too (too small raises an error with the minimum). With the slot near the back edge, the tip angle was only 16-24°; now 26° (Plasma) to 38° (Konqi). Tests: the centre of mass 3 mm inside the support at 60/100/150 mm, and at least 25° of tilt in every direction (densities from PrusaSlicer: standee 0.92, pedestal 0.43 g/cm3).
 - **Cleanup in 2D, not in OCCT.** All booleans run in shapely. Grooves of a lower colour narrower than `MIN_GAP` are widened (long ones) or filled (specks below `SPECK`, and only specks that touch the band: a lone speck would become a raised sliver). Then raised parts thinner than `MIN_STROKE` (85 % of a line) are removed, as the last change to the shape. Finally, cracks of the lower colour narrower than `2 * HAIR` are filled: opening and simplifying move shared edges by a hair, and those cracks showed as thin rings (orange rings around Plasma's dots). A crack always lies against the band, so filling it adds no sliver. `_tidy()` removes zero-width spikes and tiny holes (they gave degenerate faces and a 3MF mesh error); `_clean()` also simplifies.
 
+## How an ornament is built
+
+- **Two halves.** One extruder colours by Z only, so the bed face is one colour. An ornament is two halves on one plate, with the same M600s, glued bed face to bed face. `as_ornament(fig)` is the figure with `height=ornament_h` and `base_t=ornament_t` (1.2 mm): with it, `drawing`, `band_z`, `colour_changes` and the rest of `relief.py` work unchanged, and the caches key on it. The glued core is 2.4 mm, as thick as a standee body. `ornament_plates` raises an error if the two halves do not fit side by side on the bed (checked on the 2D layout, before the solids are built; Plasma stops at about 100 mm).
+- **The back half.** It turns over about the y axis (x → −x), so its outline must be the front's mirror image. A printed face always shows its image the right way round when seen from its own side. So: if the outline is symmetric (`is_symmetric`: no point of the edge more than `SYMMETRY` = 0.05 mm from the mirrored edge; KDE, Plasma), the layout is moved so that the axis is x = 0 and the back half is a copy (the drawing reads correctly from behind); otherwise (Gentoo, Larry, Konqi) the back half is the mirror image (`mirror_back`, the drawing looks mirrored from behind). The back half needs no booleans: its solids are the front's, mirrored across the YZ plane (`Part.mirror`) or copied. The front half costs as much as a standee (the fuse of the bands).
+- **The tab.** The ornament hangs with the centre of mass of the glued ornament under the hole. With a mirrored back, that is one half's centre of mass; with a copy, it is on the axis (the two halves' centres lie on both sides). The ring around the hole (`RING_W`, 5 lines) sits on the highest point of the body below it, so the hole is always `RING_W` away from the drawing; a convex neck joins it to the body. The tab is band 0 only. `layout()` places it again until the centre of mass and the hole agree, or raises an error (it never uses fixed millimetres; tests at 50/70/100 mm). The tab changes the outline of the Gentoo logo on top, like the tenon at the bottom; the owner accepted this.
+- **Dowel sockets.** Two blind holes (`SOCKET_D` 2 mm, `SOCKET_DEPTH` 0.6 mm) in the glued face, for pieces of 1.75 mm filament. They lie where both halves have one once glued: far apart inside the body (`SOCKET_WALL` from the edge), or a mirror-image pair for a copied back. Band 0 is two slabs: up to `SOCKET_DEPTH` without the sockets, then whole. PrusaSlicer bridges their ceilings without support. They are an extra: if a print shows them through the front face, remove them rather than tune them.
+
 ## Frames
 
 - **2D (standing) frame:** x is centred on the drawing, y points up, the foot is at y = 0, the tenon is below it.
 - **Print pose of a standee:** the same x and y on the bed, the front face up (+z), z = 0 on the bed.
 - **Assembly frame:** `relief.standing()` turns the standee up: its front faces −y, its back face is at y = 0, the foot at z = 0. The pedestal's top face is at z = 0; `pedestal.print_pose()` lifts it onto the bed.
+- **Ornament:** the 2D frame is not cut (the drawing starts at y = 0) and, for a symmetric outline, the axis is x = 0. Both halves lie front face up on the bed. `ornament.coloured()` turns the back half over (`Rot(0, 180, 0)`) and hangs both up with `relief.standing()`: the front faces −y, the glued faces are at y = 0.
 
 ## Checks after any change
 
-1. Run `uv run pytest`. It covers the fill rules, the colour maps (no unknown keys), uniform scale, nested bands, foot and tenon, tenon/slot fit and collisions, flat faces on the layer grid, M600 heights, raised strokes ≥ 85 % of a line, grooves ≥ one line, lettering strokes, floating islands, valid single solids, watertight STLs, and the 3MF plates.
+1. Run `uv run pytest`. It covers the fill rules, the colour maps (no unknown keys), uniform scale, nested bands, foot and tenon, tenon/slot fit and collisions, flat faces on the layer grid, M600 heights, raised strokes ≥ 85 % of a line, grooves ≥ one line, lettering strokes, floating islands, valid single solids, watertight STLs, the 3MF plates, and the ornaments (hang upright at any size, hole clear of the drawing, halves that line up once glued, blind dowel sockets).
 2. Run `uv run linux3d export`. Every part must print `OK`. Compare the volumes with the previous run.
-3. Look at `out/render/*_flat.png` and the renders.
+3. Look at `out/standees/render/*_flat.png`, `out/ornaments/render/*_flat.png` and the renders (`<name>_back.png` for the back of an ornament).
 4. If PrusaSlicer is available, run `uv run linux3d slice`: every plate must say `OK`.
 
 ## 3MF and PrusaSlicer notes (from the halloween project)
@@ -81,7 +91,7 @@ uv run linux3d render [FIGURE ...] [--gif]
 - The `code` and `mode` elements need `bed_idx="0"` (PrusaSlicer 2.9 has multiple beds). Without it the CLI still applies the colour change, but the GUI silently drops it.
 - The CLI crashes on `--export-3mf` without a display. So `slicer.py` slices to text G-code, copies the `; prusaslicer_config` block into `Metadata/Slic3r_PE.config` and sets `binary_gcode = 1` again.
 - The MK4 profiles build supports only inside support enforcers. `slicer.py` slices once more with `--support-material --support-material-auto --dont-support-bridges`; the result must have no support.
-- Never put a standee and a pedestal on the same plate: the standee's M600s would stripe the pedestal.
+- Never put a standee and a pedestal on the same plate: the standee's M600s would stripe the pedestal. The two halves of an ornament do share a plate: their M600s are the same.
 
 ## build123d gotchas
 
