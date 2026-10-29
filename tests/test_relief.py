@@ -71,6 +71,15 @@ def test_bands_are_nested(fig, kind):
     assert relief.is_nested(layout_of(kind, fig))
 
 
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("fig", FIGS + [figure("konqi", height=145.0, ornament_h=145.0)],
+                         ids=IDS + ["konqi_145mm"])
+def test_bands_are_valid_geometry(fig, kind):
+    """At 145 mm, GEOS returned a buffer with crossed rings for Konqi, and the next boolean
+    failed: opening() repairs it."""
+    assert all(band.is_valid for band in layout_of(kind, fig).bands)
+
+
 @pytest.mark.parametrize("fig", FIGS, ids=IDS)
 def test_foot_and_tenon(fig):
     lay = relief.layout(fig)

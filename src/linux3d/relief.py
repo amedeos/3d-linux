@@ -90,10 +90,16 @@ def _clean(geom: BaseGeometry) -> BaseGeometry:
 
 
 def opening(geom: BaseGeometry, r: float) -> BaseGeometry:
-    """Remove every part thinner than 2 r (morphological opening)."""
+    """Remove every part thinner than 2 r (morphological opening).
+
+    GEOS can, rarely, return a buffer whose rings cross (Konqi at 145 mm), and the next
+    boolean then fails. Such a result is repaired: overlapping shells are joined.
+    """
     if geom.is_empty:
         return geom
-    return geom.buffer(-r, join_style="round").buffer(r, join_style="round")
+    out = geom.buffer(-r, join_style="round").buffer(r, join_style="round")
+    return out if out.is_valid else shapely.make_valid(out, method="structure",
+                                                       keep_collapsed=False)
 
 
 def drawing(fig: Figure) -> dict[str, BaseGeometry]:
