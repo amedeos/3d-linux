@@ -180,7 +180,18 @@ def scene(fig) -> list:
     return relief.coloured(fig) + pedestal.coloured(fig)
 
 
-def mask(geom, bounds, px_per_mm: float, pad: int = 10) -> Image.Image:
+PAD = 10  # pixels around a 2D preview
+BACKGROUND = (214, 222, 230)  # behind a 2D preview
+PLUMB = "#e6008c"  # the plumb line of the hanging preview: no filament has this colour
+
+
+def _to_px(bounds, px_per_mm: float, pad: int = PAD):
+    """The map from mm (y up) to the pixels (y down) of a 2D preview of these bounds."""
+    x0, _, _, y1 = bounds
+    return lambda x, y: ((x - x0) * px_per_mm + pad, (y1 - y) * px_per_mm + pad)
+
+
+def mask(geom, bounds, px_per_mm: float, pad: int = PAD) -> Image.Image:
     """A 1-bit image of a geometry (y up), inside bounds = (x0, y0, x1, y1) plus pad pixels.
 
     Each polygon gets its own layer (outside filled, holes cleared), and the layers are
@@ -193,9 +204,10 @@ def mask(geom, bounds, px_per_mm: float, pad: int = 10) -> Image.Image:
 
     x0, y0, x1, y1 = bounds
     size = (int((x1 - x0) * px_per_mm) + 2 * pad, int((y1 - y0) * px_per_mm) + 2 * pad)
+    to_px = _to_px(bounds, px_per_mm, pad)
 
     def pts(coords):
-        return [((x - x0) * px_per_mm + pad, (y1 - y) * px_per_mm + pad) for x, y in coords]
+        return [to_px(x, y) for x, y in coords]
 
     out = Image.new("1", size, 0)
     for poly in polygons(geom):
@@ -208,20 +220,66 @@ def mask(geom, bounds, px_per_mm: float, pad: int = 10) -> Image.Image:
     return out
 
 
+def _flat_image(fig, bands, px_per_mm: float) -> Image.Image:
+    """The bands in 2D, one colour per band, drawn by mask() inside bands[0].bounds."""
+    from .filaments import FILAMENTS
+
+    img = None
+    for band, name in zip(bands, fig.bands):
+        m = mask(band, bands[0].bounds, px_per_mm)
+        if img is None:
+            img = Image.new("RGB", m.size, BACKGROUND)
+        img.paste(FILAMENTS[name], mask=m)
+    return img
+
+
 def flat_preview(fig, path: Path, px_per_mm: float = 8.0, bands=None) -> Path:
     """The standee (or other bands of the figure, e.g. an ornament's) seen from the front
     in 2D, one colour per band: check the colour map."""
-    from .filaments import FILAMENTS
     from .relief import layout
 
-    bands = layout(fig).bands if bands is None else bands
-    bounds = bands[0].bounds
-    img = None
-    for band, name in zip(bands, fig.bands):
-        m = mask(band, bounds, px_per_mm)
-        if img is None:
-            img = Image.new("RGB", m.size, (214, 222, 230))
-        img.paste(FILAMENTS[name], mask=m)
+    img = _flat_image(fig, layout(fig).bands if bands is None else bands, px_per_mm)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(path)
+    return path
+
+
+def hang_preview(fig, path: Path, px_per_mm: float = 8.0) -> Path:
+    """The ornament seen from the front, with a plumb line from the top of the hole (where
+    the hook rests) and a mark on the centre of mass of the glued ornament: if the mark
+    lies on the line, the ornament hangs upright.
+
+    The mark comes from the solids of both halves (ornament.mass_centre), not from the 2D
+    centre that placed the hole, so the picture checks the placement.
+    """
+    from PIL import ImageDraw, ImageFont
+
+    from . import ornament
+    from .pedestal import FONT
+
+    lay = ornament.layout(fig)
+    centre = ornament.mass_centre(fig)
+    to_px = _to_px(lay.bands[0].bounds, px_per_mm)
+
+    def px(x: float, y: float) -> tuple[int, int]:
+        return tuple(round(v) for v in to_px(x, y))
+
+    flat = _flat_image(fig, lay.bands, px_per_mm)
+    font = ImageFont.truetype(str(FONT), 22)
+    caption = f"{fig.name}: hangs {ornament.hang_angle(lay.hole, centre):.2f}° off upright"
+    _, _, text_w, text_h = font.getbbox(caption)
+    img = Image.new("RGB", (max(flat.width, text_w + 2 * PAD), flat.height + text_h + 2 * PAD),
+                    BACKGROUND)
+    img.paste(flat, (0, 0))
+    draw = ImageDraw.Draw(img)
+    hx, hy, r = lay.hole
+    top = px(hx, hy + r)
+    draw.line([top, (top[0], flat.height - 1)], fill=PLUMB, width=3)
+    cx, cy = px(*centre)
+    mark = round(1.5 * px_per_mm)
+    draw.ellipse([cx - mark, cy - mark, cx + mark, cy + mark], outline=PLUMB, width=3)
+    draw.line([(cx - mark, cy), (cx + mark, cy)], fill=PLUMB, width=3)
+    draw.text((PAD, flat.height + PAD), caption, fill=(28, 26, 30), font=font)
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path)
     return path
@@ -246,8 +304,8 @@ def figure_images(fig, out: Path, with_gif: bool = False) -> list[Path]:
 
 
 def ornament_images(fig, out: Path, with_gif: bool = False) -> list[Path]:
-    """Every image of one ornament: hanging (from the front and from the back), flat, and
-    both halves lying on the plate."""
+    """Every image of one ornament: hanging (from the front and from the back), flat, with
+    the plumb line, and both halves lying on the plate."""
     from build123d import Pos
 
     from . import ornament
@@ -255,7 +313,8 @@ def ornament_images(fig, out: Path, with_gif: bool = False) -> list[Path]:
     out.mkdir(parents=True, exist_ok=True)
     lay = ornament.layout(fig)
     paths = [out / f"{fig.name}.png", out / f"{fig.name}_back.png", out / f"{fig.name}_print.png",
-             flat_preview(fig, out / f"{fig.name}_flat.png", bands=lay.bands)]
+             flat_preview(fig, out / f"{fig.name}_flat.png", bands=lay.bands),
+             hang_preview(fig, out / f"{fig.name}_hang.png")]
     items = ornament.coloured(fig)  # once: both halves, turned over and hung up
     render(items, paths[0], size=(800, 900), **FRONT)
     render(items, paths[1], size=(800, 900), **{**FRONT, "azim": FRONT["azim"] + 180})
@@ -275,7 +334,13 @@ def ornament_images(fig, out: Path, with_gif: bool = False) -> list[Path]:
 
 def all_images(fig, out: Path = OUT, with_gif: bool = False) -> list[Path]:
     """The standee's images into out/standees/render, the ornament's into
-    out/ornaments/render."""
+    out/ornaments/render.
+
+    An older GIF of the figure goes first, even if a render fails later: it would not
+    match the new images. A new GIF comes only with with_gif.
+    """
+    for kind in (STANDEES, ORNAMENTS):
+        (out / kind / "render" / f"{fig.name}.gif").unlink(missing_ok=True)
     return (figure_images(fig, out / STANDEES / "render", with_gif)
             + ornament_images(fig, out / ORNAMENTS / "render", with_gif))
 

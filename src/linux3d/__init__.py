@@ -8,7 +8,8 @@ commands:
   list      the figures, their colour bands and the filaments still to buy
   export    STL files and 3MF plates in out/standees and out/ornaments; exit 1 on problems
   slice     slice the 3MF plates with the PrusaSlicer CLI: times, M600 check, projects
-  render    PNG previews in out/standees/render and out/ornaments/render (--gif: a GIF too)
+  render    PNG previews in out/standees/render and out/ornaments/render (--gif: a GIF too;
+            without it, an older GIF of the figure is removed)
 
 options (for export and render; they change every FIGURE given, or all of them):
   --height MM            height of the standee's drawing (ornament: --set ornament_h=MM)

@@ -55,7 +55,7 @@ uv run linux3d render             # PNG previews in out/*/render (add --gif for 
 | `…/stl/` | one STL per part, already in its print position |
 | `…/3mf/` | one 3MF plate per print job, with the colour changes; `plan.json`; `assembly_preview.3mf` (view only) |
 | `…/3mf/projects/` | PrusaSlicer projects, written by `slice` |
-| `…/render/` | PNG previews, written by `render` |
+| `…/render/` | PNG previews, written by `render`; with `--gif` also a turning GIF (without it, `render` removes an older GIF of the figure, which would no longer match) |
 
 ## Change the parameters
 
@@ -165,7 +165,7 @@ Every figure is also an ornament for the Christmas tree, 70 mm high (plus the ha
 
 - **Two halves, glued back to back.** With one extruder, the face on the bed comes out in one colour. So each ornament is two halves, printed together on one plate with the same colour changes. Glue them with their flat bed faces together.
 - **The back.** Turned over, the back half must have the mirror image of the front's outline, or the two do not line up. If the outline is symmetric (the KDE square, the Plasma and Debian discs), the back half is simply a copy of the front, and the drawing reads the right way round from behind too. Otherwise (Gentoo, Larry, Konqi, Katie, Tux, GNU, Arch, Fedora) the back half is the mirror image: from behind, the drawing looks as if you saw it through the ornament.
-- **It hangs upright.** A tab with a 4 mm hole (for an ornament hook or a thin ribbon) sits on top, straight above the centre of mass, so the ornament does not hang crooked. The tab is in the body colour and lies outside the drawing, which keeps its shape and colours. `export` prints how far each ornament hangs off upright (0.01° at most).
+- **It hangs upright.** A tab with a 4 mm hole (for an ornament hook or a thin ribbon) sits on top, straight above the centre of mass, so the ornament does not hang crooked. The tab is in the body colour and lies outside the drawing, which keeps its shape and colours. `export` prints how far each ornament hangs off upright (0.01° at most). `out/ornaments/render/<name>_hang.png` checks it on the solids: a plumb line drops from the top of the hole, where the hook rests, and the mark on the centre of mass of the solids lies on it. The hole does not always sit over the middle of the drawing: Larry's head on the right balances his body and tail on the left, so his hole sits above the ear on the left, next to the horn. Both checks treat the ornament as solid plastic. The real print has sparse infill inside the thicker colour bands, which moves the centre of mass a little: measured on the sliced G-code, by 0.3 mm at most (Katie, 0.4°).
 - **Dowels line the halves up.** The glued face of each half has two small blind holes (2 mm wide, 0.6 mm deep). Cut two pieces of 1.75 mm filament, about 1 mm long, and put them into the holes of one half before you glue: they hold the two halves in place while the glue sets.
 - **Glue.** For PETG, use cyanoacrylate (super glue) or a two-part epoxy, a thin layer, and press the halves together for a minute. A toothpick through both hanging holes helps to line them up too.
 - Each half is thin (1.2 mm body + 0.8 mm per colour band), so a glued ornament weighs only 9 to 21 g.
