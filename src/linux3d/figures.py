@@ -77,14 +77,15 @@ class Figure:
             raise ValueError(f"{self.name}: bands is empty; give at least one filament")
         names = list(self.bands) + [self.pedestal_colour]
         names += [c for c in (self.background, self.text_colour) if c]
-        names += [v for _, v in self.colours if v != DROP]
+        mapped = [v for _, v in self.colours if v != DROP]
+        names += mapped
         unknown = sorted({n for n in names if n not in FILAMENTS})
         if unknown:
             raise ValueError(f"{self.name}: unknown filament(s) {unknown}; "
                              f"choose from {sorted(FILAMENTS)}")
         if len(set(self.bands)) != len(self.bands):
             raise ValueError(f"{self.name}: a filament appears twice in bands {self.bands}")
-        for v in [*(v for _, v in self.colours if v != DROP), self.background]:
+        for v in [*mapped, self.background]:
             if v and v not in self.bands:
                 raise ValueError(f"{self.name}: {v} is mapped but is not one of the bands; "
                                  "add it to bands or change the map (--set colours=...)")
@@ -157,6 +158,63 @@ FIGURES = {f.name: f for f in [
         # Konqi stands on one foot, 11 mm beside its centre of mass: `support` puts a
         # post under the raised foot (6.4 mm up), and the tenon reaches under both feet
         height=120.0, min_foot=10.0, text_colour="green",
+    ),
+    Figure(
+        name="tux", title="Tux", svg="tux/penguin-flat.svg",
+        bands=("black", "white", "gold"),  # Simon Budig's three-colour Tux
+        # the thin highlight lines on the wings and over the eyes are thinner than a
+        # line: at 100 mm they print in pieces, at 70 mm not at all. Leave them out, so
+        # Tux looks the same at any size
+        colours=tuple((key, DROP) for key in ("#28", "#29", "#34", "#35", "#36")),
+        text_colour="gold",
+    ),
+    Figure(
+        name="gnu", title="GNU", svg="gnu/Heckert_GNU_white.svg",
+        bands=("black", "white"),
+        background="white",  # some gaps between the strands of fur go right through
+        text_colour="white",
+    ),
+    Figure(
+        name="debian_logo", title="Debian", svg="debian/openlogo-nd.svg",
+        bands=("white", "red"),
+        backing="circle", margin=4.0, height=90.0,  # the swirl has loose brush flecks
+        text_colour="white", pedestal_colour="red",
+    ),
+    Figure(
+        name="arch_logo", title="Arch Linux", svg="arch/archlinux-logo-only.svg",
+        bands=("white", "blue"),
+        # the logo without its ™ sign (the owner's choice): the ™ is 4 mm tall beside the
+        # A and prints whole only from about 140 mm, where the gaps inside the M are
+        # one line wide
+        colours=(("path3940", DROP), ("path3942", DROP)),
+        text_colour="white", pedestal_colour="blue",
+    ),
+    Figure(
+        name="fedora_logo", title="Fedora", svg="fedora/fedora_dark-background.svg",
+        bands=("light_blue", "white"),  # the official colours: the owner buys light_blue
+        # the logo mark only: the "fedora" wordmark is left out
+        colours=tuple((key, DROP) for key in ("path1946", "path1948", "path1950",
+                                              "path1952", "path1956", "path1958")),
+        margin=0.0,  # the bubble is the body
+        text_colour="white", pedestal_colour="light_blue",
+    ),
+    Figure(
+        name="katie", title="Katie", svg="kde/katie.svg",  # traced: tools/trace_katie.py
+        # the official colours of her 2026 design (the owner buys the three new ones),
+        # except her amber (#ffaf2f), which prints in the owner's yellow gold. As for
+        # Konqi, a black body gives the cartoon outline: the green, orange and grey
+        # outlines of the drawing become black, and so do the eye and the mouth. Gold
+        # comes last: the amber shading tapers to a point along the edges of the yellow
+        # parts, and below the yellow those tips would be grooves narrower than a line
+        bands=("black", "light_green", "bright_green", "white", "yellow", "gold"),
+        colours=(("#3fca3b", "black"), ("#db862c", "black"), ("#b8b8b8", "black"),
+                 ("#434343", "black"), ("#e3311c", "black"), ("#ef551a", "black"),
+                 ("#dbdbdb", "white"),  # shading on the white parts
+                 ("#aaebb1", "bright_green"), ("#cef2a0", "light_green")),  # highlights
+        # she stands on one small shoe and lifts the other foot: a 14 mm foot would cut
+        # her leg off at the shin, so the foot is narrower and a post goes under the
+        # lifted foot (18.6 mm up). The tenon reaches under both
+        height=120.0, min_foot=8.0, text_colour="gold",
     ),
 ]}
 

@@ -1,3 +1,16 @@
+Exceptions
+
+This repository is under the Creative Commons Attribution-ShareAlike 4.0
+International license below, except:
+
+- The artwork in src/linux3d/assets/ keeps its own license: see the
+  ATTRIBUTION.md file in each folder.
+- The Arch Linux artwork (src/linux3d/assets/arch/) is under CC BY-NC-SA 3.0,
+  and so are the models made from it (the arch_logo parts): they are for
+  non-commercial use only.
+
+=======================================================================
+
 Attribution-ShareAlike 4.0 International
 
 =======================================================================

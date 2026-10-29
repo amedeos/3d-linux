@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from scipy.spatial import cKDTree
 
-from linux3d import relief
+from linux3d import pedestal, relief
 from linux3d.coupon import coupon_parts
 from linux3d.export import check, mesh_problems
 from linux3d.figures import FIGURES
@@ -34,7 +34,11 @@ def test_no_corners_a_fraction_of_a_micron_apart(parts, name):
 def test_volumes_are_sane(parts, name):
     # a boolean that fails silently can drop half of a part without any error
     standee = parts[f"{name}_standee"].volume / 1000
-    pedestal = parts[f"{name}_pedestal"].volume / 1000
-    assert 8 < standee < 40 and 30 < pedestal < 80
+    assert 8 < standee < 40
+    # the pedestal is nearly the full block that pedestal.size() plans (the slot and the
+    # chamfer take a few per cent, the lettering adds a little), whatever its size
+    s = pedestal.size(FIGURES[name])
+    planned = (s.x1 - s.x0) * (s.y1 - s.y0) * s.h
+    assert 0.94 < parts[f"{name}_pedestal"].volume / planned < 1.0
     halves = [parts[f"{name}_ornament_{side}"].volume / 1000 for side in ("front", "back")]
     assert 2 < halves[0] < 15 and halves[1] == pytest.approx(halves[0], rel=1e-3)

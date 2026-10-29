@@ -92,8 +92,10 @@ def test_back_half_is_a_copy_only_for_symmetric_outlines():
     lies behind the front if the outline is symmetric."""
     mirror = {name: ornament.layout(fig).mirror_back for name, fig in FIGURES.items()}
     assert mirror == {"gentoo_logo": True, "larry": True, "kde_logo": False,
-                      "plasma_logo": False, "konqi": True}
-    for name in ("kde_logo", "plasma_logo"):
+                      "plasma_logo": False, "konqi": True, "tux": True, "gnu": True,
+                      "debian_logo": False, "arch_logo": True, "fedora_logo": True,
+                      "katie": True}
+    for name in ("kde_logo", "plasma_logo", "debian_logo"):
         lay = ornament.layout(FIGURES[name])
         x0, _, x1, _ = lay.body.bounds
         assert lay.hole[0] == 0.0 and abs(x0 + x1) < 1e-6  # the axis is at x = 0

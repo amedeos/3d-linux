@@ -1,7 +1,7 @@
 [project]
 name = "linux3d"
 version = "0.1.0"
-description = "Parametric, printable Linux logos and mascots (Gentoo, Larry the Cow, KDE, Plasma, Konqi) as layered-colour standees on pedestals"
+description = "Parametric, printable Linux logos and mascots (Gentoo, Larry the Cow, KDE, Plasma, Konqi, Katie, Tux, GNU, Debian, Arch Linux, Fedora) as layered-colour standees on pedestals and Christmas tree ornaments"
 readme = "README.md"
 requires-python = ">=3.13,<3.15"
 dependencies = [
