@@ -104,7 +104,10 @@ def test_grooves_stay_open(fig, kind):
     """What shows of a lower colour between raised areas is at least one line wide."""
     lay = layout_of(kind, fig)
     for k in range(1, len(lay.bands)):
-        lower = lay.bands[k - 1].difference(lay.bands[k])
+        # where two bands share an edge, the difference leaves cracks a fraction of a
+        # micron wide (boolean noise, as relief.HAIR says): a raster shows each one as a
+        # line of pixels, so leave them out (Katie has many shared edges)
+        lower = relief.opening(lay.bands[k - 1].difference(lay.bands[k]), relief.HAIR)
         assert _thin_fraction(lower, P.MIN_GAP) < 0.03, f"under band {k} ({fig.bands[k]})"
 
 

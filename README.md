@@ -1,6 +1,6 @@
 # 3d-linux: Linux logos and mascots for your desk and your Christmas tree 🐧🎄
 
-Parametric, printable figures of Linux logos and mascots: the **Gentoo** logo, **Larry the Cow**, the **KDE** logo, the **Plasma** logo and **Konqi**. Each one is a colourful standee that stands upright on a pedestal with its name on it, and also a **Christmas tree ornament** with the drawing on both sides.
+Parametric, printable figures of Linux logos and mascots: the **Gentoo** logo, **Larry the Cow**, the **KDE** logo, the **Plasma** logo, **Konqi**, **Katie**, **Tux**, the **GNU** head, and the **Debian**, **Arch Linux** and **Fedora** logos. Each one is a colourful standee that stands upright on a pedestal with its name on it, and also a **Christmas tree ornament** with the drawing on both sides.
 
 Everything is written in Python with [build123d](https://github.com/gumyr/build123d). The shapes come from the official SVG artwork, and every size, colour and clearance is a parameter.
 
@@ -20,10 +20,16 @@ Everything is written in Python with [build123d](https://github.com/gumyr/build1
 | `kde_logo` | 100 mm | blue → white | blue, white lettering | 70 mm, same on both sides |
 | `plasma_logo` | 90 mm | white → black → orange → green → blue | black, white lettering | 70 mm, same on both sides |
 | `konqi` | 120 mm | black → green → white → red → orange | black, green lettering | 70 mm, back mirrored |
+| `katie` | 120 mm | black → light green → bright green → white → yellow → gold | black, gold lettering | 70 mm, back mirrored |
+| `tux` | 100 mm | black → white → gold | black, gold lettering | 70 mm, back mirrored |
+| `gnu` | 100 mm | black → white | black, white lettering | 70 mm, back mirrored |
+| `debian_logo` | 90 mm | white → red | red, white lettering | 70 mm, same on both sides |
+| `arch_logo` | 100 mm | white → blue (without the ™) | blue, white lettering | 70 mm, back mirrored |
+| `fedora_logo` | 100 mm | light blue → white | light blue, white lettering | 70 mm, back mirrored |
 
 The height is the height of the drawing. The ornaments use the same colour bands as the standees.
 
-The filaments are the ones on the author's shelf (Prusament PETG): black, white, red, yellow gold, green, orange, violet, grey and blue. Change them in `src/linux3d/filaments.py`.
+The filaments are the ones on the author's shelf (Prusament PETG): black, white, red, yellow gold, green, orange, violet, grey and blue. Katie and the Fedora logo keep their official colours instead, which are not on the shelf: light blue (Fedora, #51a2da) and light green, bright green and yellow (Katie; her amber prints in yellow gold). `uv run linux3d list` shows them as "to buy". Change the filaments in `src/linux3d/filaments.py`.
 
 ## Requirements
 
@@ -33,7 +39,7 @@ The filaments are the ones on the author's shelf (Prusament PETG): black, white,
 
 ```sh
 uv sync
-uv run pytest                     # ~140 s: SVG reading, bands, layers, fit, printability, ornaments, 3MF, CLI
+uv run pytest                     # ~9 min: SVG reading, bands, layers, fit, printability, ornaments, 3MF, CLI
 uv run linux3d list               # the figures and their colour bands
 uv run linux3d export             # STL files and 3MF plates in out/standees and out/ornaments
 uv run linux3d slice              # optional, needs PrusaSlicer: times, M600 check, projects
@@ -70,7 +76,7 @@ Useful parameters: `height`, `bands`, `support` (a post when the figure would le
 
 Thicknesses and heights (`base_t`, `band_t`, `pedestal_h`, `text_h`, `ornament_t`) must be whole numbers of 0.2 mm layers; the command refuses other values, because the colour change would land one layer late.
 
-To add your own figure, put an SVG into `src/linux3d/assets/` and add a `Figure` to the list. Then check the colour mapping in `out/standees/render/<name>_flat.png` and `out/ornaments/render/<name>_flat.png`.
+To add your own figure, put an SVG into `src/linux3d/assets/` and add a `Figure` to the list. A drawing that exists only as a picture has to be traced first: `tools/trace_katie.py` shows how (it makes Katie's SVG from Tyson Tan's PNG with [vtracer](https://github.com/visioncortex/vtracer)). Then check the colour mapping in `out/standees/render/<name>_flat.png` and `out/ornaments/render/<name>_flat.png`.
 
 ## Printing
 
@@ -96,6 +102,18 @@ The standees (`out/standees/`):
 | `plasma_logo_pedestal_black-white` | white at 14.20 mm | 37 min | 18 g |
 | `konqi_standee_black-green-white-red-orange` | green 2.60, white 3.40, red 4.20, orange 5.00 mm | 57 min | 20 g |
 | `konqi_pedestal_black-green` | green at 14.20 mm | 51 min | 25 g |
+| `tux_standee_black-white-gold` | white 2.60, gold 3.40 mm | 36 min | 16 g |
+| `tux_pedestal_black-gold` | gold at 14.20 mm | 35 min | 16 g |
+| `gnu_standee_black-white` | white at 2.60 mm | 52 min | 18 g |
+| `gnu_pedestal_black-white` | white at 14.20 mm | 40 min | 19 g |
+| `debian_logo_standee_white-red` | red at 2.60 mm | 39 min | 20 g |
+| `debian_logo_pedestal_red-white` | white at 14.20 mm | 34 min | 16 g |
+| `arch_logo_standee_white-blue` | blue at 2.60 mm | 28 min | 12 g |
+| `arch_logo_pedestal_blue-white` | white at 14.20 mm | 1 h 1 min | 29 g |
+| `fedora_logo_standee_light_blue-white` | white at 2.60 mm | 41 min | 23 g |
+| `fedora_logo_pedestal_light_blue-white` | white at 14.20 mm | 48 min | 23 g |
+| `katie_standee_black-light_green-bright_green-white-yellow-gold` | light green 2.60, bright green 3.40, white 4.20, yellow 5.00, gold 5.80 mm | 1 h 2 min | 19 g |
+| `katie_pedestal_black-gold` | gold at 14.20 mm | 40 min | 19 g |
 | `coupon_slot_gauge` | none | 22 min | 7 g |
 
 The ornaments (`out/ornaments/`), both halves on one plate:
@@ -107,6 +125,12 @@ The ornaments (`out/ornaments/`), both halves on one plate:
 | `kde_logo_ornament_blue-white` | white at 1.40 mm | 36 min | 17 g |
 | `plasma_logo_ornament_white-black-orange-green-blue` | black 1.40, orange 2.20, green 3.00, blue 3.80 mm | 40 min | 21 g |
 | `konqi_ornament_black-green-white-red-orange` | green 1.40, white 2.20, red 3.00, orange 3.80 mm | 39 min | 11 g |
+| `tux_ornament_black-white-gold` | white 1.40, gold 2.20 mm | 30 min | 12 g |
+| `gnu_ornament_black-white` | white at 1.40 mm | 43 min | 13 g |
+| `debian_logo_ornament_white-red` | red at 1.40 mm | 34 min | 16 g |
+| `arch_logo_ornament_white-blue` | blue at 1.40 mm | 22 min | 9 g |
+| `fedora_logo_ornament_light_blue-white` | white at 1.40 mm | 29 min | 14 g |
+| `katie_ornament_black-light_green-bright_green-white-yellow-gold` | light green 1.40, bright green 2.20, white 3.00, yellow 3.80, gold 4.60 mm | 45 min | 10 g |
 
 \* PrusaSlicer 2.9.6 estimates (Prusament PETG, 0.20mm STRUCTURAL), not counting the time for the filament changes.
 
@@ -125,9 +149,9 @@ The 3MF files already contain them. With the STL files, add them yourself: open 
 
 The tenon in the slot holds the figure; the pedestal keeps the whole thing on its feet. Two rules keep the figures steady:
 
-- **The centre of mass lies over the foot.** Otherwise the tenon carries the whole weight on one side, and the figure leans in the slot until the tenon meets the wall: by up to 0.7° with the default clearance (about 1 mm at the top). With `support` (on by default), the program computes the centre of mass and, if it lies less than 3 mm inside the foot, adds a post in the body colour under the lowest part beyond it. Konqi stands on one foot in its drawing, so it gets a black post under its raised foot, 7.4 mm high. This works at any `--height`; if no part of the figure comes low enough, `export` stops with an error.
+- **The centre of mass lies over the foot.** Otherwise the tenon carries the whole weight on one side, and the figure leans in the slot until the tenon meets the wall: by up to 0.7° with the default clearance (about 1 mm at the top). With `support` (on by default), the program computes the centre of mass and, if it lies less than 3 mm inside the foot, adds a post in the body colour under the lowest part beyond it. Konqi stands on one foot in its drawing, so it gets a black post under its raised foot, 7.4 mm high. Katie gets one under her lifted foot (18.6 mm), and the GNU head a small one under its beard (4.4 mm). This works at any `--height`; if no part of the figure comes low enough, `export` stops with an error.
 - **The Gentoo logo is the exception.** The "g" stands on its lower left lobe, 15 mm beside its centre of mass, but a post would change the logo's outline. So it has `support=False` and leans by up to 0.7°. A tighter slot from the slot gauge makes that smaller. `export` prints a note for every figure that gets a post or that leans.
-- **The pedestal is deep, and the figure stands near its middle.** The automatic depth is 45 % of the figure height (more if the lettering needs it), and the figure stands 45 % of the depth from the back edge, also with your own `pedestal_d`. Every assembly must tilt by at least 26° (Plasma) to 38° (Konqi) before it falls over. It still weighs only 30 to 51 g, so a push of 6 to 10 grams-force at the top tips it over backwards.
+- **The pedestal is deep, and the figure stands near its middle.** The automatic depth is 45 % of the figure height (more if the lettering needs it), and the figure stands 45 % of the depth from the back edge, also with your own `pedestal_d`. Every assembly must tilt by 27° (Plasma) to 51° (the Arch Linux logo, on its wide pedestal) before it falls over. It still weighs only 30 to 51 g, so a push of 6 to 10 grams-force at the top tips it over backwards.
 
 `tests/test_relief.py` checks the rules for every figure, at heights of 60, 100 and 150 mm.
 
@@ -140,11 +164,11 @@ The slot is 0.10 mm wider than the tenon on each side. This worked well in PETG 
 Every figure is also an ornament for the Christmas tree, 70 mm high (plus the hanging tab), with the drawing on both sides.
 
 - **Two halves, glued back to back.** With one extruder, the face on the bed comes out in one colour. So each ornament is two halves, printed together on one plate with the same colour changes. Glue them with their flat bed faces together.
-- **The back.** Turned over, the back half must have the mirror image of the front's outline, or the two do not line up. If the outline is symmetric (the KDE square, the Plasma disc), the back half is simply a copy of the front, and the drawing reads the right way round from behind too. Otherwise (Gentoo, Larry, Konqi) the back half is the mirror image: from behind, the drawing looks as if you saw it through the ornament.
+- **The back.** Turned over, the back half must have the mirror image of the front's outline, or the two do not line up. If the outline is symmetric (the KDE square, the Plasma and Debian discs), the back half is simply a copy of the front, and the drawing reads the right way round from behind too. Otherwise (Gentoo, Larry, Konqi, Katie, Tux, GNU, Arch, Fedora) the back half is the mirror image: from behind, the drawing looks as if you saw it through the ornament.
 - **It hangs upright.** A tab with a 4 mm hole (for an ornament hook or a thin ribbon) sits on top, straight above the centre of mass, so the ornament does not hang crooked. The tab is in the body colour and lies outside the drawing, which keeps its shape and colours. `export` prints how far each ornament hangs off upright (0.01° at most).
 - **Dowels line the halves up.** The glued face of each half has two small blind holes (2 mm wide, 0.6 mm deep). Cut two pieces of 1.75 mm filament, about 1 mm long, and put them into the holes of one half before you glue: they hold the two halves in place while the glue sets.
 - **Glue.** For PETG, use cyanoacrylate (super glue) or a two-part epoxy, a thin layer, and press the halves together for a minute. A toothpick through both hanging holes helps to line them up too.
-- Each half is thin (1.2 mm body + 0.8 mm per colour band), so a glued ornament weighs only 10 to 21 g.
+- Each half is thin (1.2 mm body + 0.8 mm per colour band), so a glued ornament weighs only 9 to 21 g.
 
 ## Artwork, trademarks and license
 
@@ -152,10 +176,19 @@ The models use official artwork. See the `ATTRIBUTION.md` files in `src/linux3d/
 
 - the Gentoo logo and Larry the Cow: CC BY-SA 2.5 (Gentoo Foundation, Lennart Andre Rolland, Matteo Pescarin, Ethan Dunham);
 - the KDE and Plasma logos: Breeze icons, LGPL-3.0-or-later;
-- Konqi: designed by Tyson Tan, SVG by Franco Perez, CC BY-SA 4.0.
+- Konqi: designed by Tyson Tan, SVG by Franco Perez, CC BY-SA 4.0;
+- Katie: designed by Tyson Tan (2026), traced to SVG for this project, CC BY-SA 4.0;
+- Tux: Larry Ewing and Simon Budig, free to use with their copyright notice (`src/linux3d/assets/tux/README`);
+- the GNU head: Aurélio A. Heckert, CC BY-SA 2.0;
+- the Debian Open Use Logo: Software in the Public Interest, Inc., CC BY-SA 3.0 (or LGPL-3.0-or-later);
+- the Arch Linux logo: Thayer Williams, CC BY-NC-SA 3.0, so **the Arch Linux models are for non-commercial use only**;
+- the Fedora logo: the Fedora Design Team, CC BY-SA 4.0 (the trademarks excepted).
 
-Gentoo is a trademark of the Gentoo Foundation, Inc. KDE® is a registered trademark of KDE e.V. This project is not affiliated with either of them. Please do not sell prints of the logos without their permission.
+Gentoo is a trademark of the Gentoo Foundation, Inc. KDE® is a registered trademark of KDE e.V. Linux® is the registered trademark of Linus Torvalds. The GNU head is a trademark of the GNU Project. Debian is a registered trademark owned by Software in the Public Interest, Inc. The Arch Linux name and logo are recognized trademarks. Fedora® and the Infinity design logo are trademarks of Red Hat, Inc. This project is not affiliated with any of them. Please do not sell prints of the logos without their permission. Two of them ask for more:
+
+- **Fedora:** the [Fedora trademark guidelines](https://docs.fedoraproject.org/en-US/legal/trademarks/) need the Fedora Council's permission for the Fedora logo on any merchandise or other non-software goods, sold or not.
+- **Arch Linux:** the [trademark policy](https://terms.archlinux.org/docs/trademark-policy/) needs a license for merchandising, and asks to keep the ™ sign intact. The models leave the ™ out: it is 4 mm tall and prints whole only on a logo of about 140 mm or more.
 
 The pedestal lettering uses Noto Sans Bold (SIL Open Font License 1.1).
 
-This repository is under **CC BY-SA 4.0** (see `LICENSE`).
+This repository is under **CC BY-SA 4.0** (see `LICENSE`), except the Arch Linux artwork and the models made from it, which are under CC BY-NC-SA 3.0.

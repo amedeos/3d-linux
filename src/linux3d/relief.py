@@ -32,6 +32,13 @@ CRUMB = 0.05  # mm2: smaller pieces of a band are left out
 SPECK = 0.3  # mm2: thinner-than-a-line gaps this small are filled, not widened
 HAIR = 0.025  # mm: cracks between two bands narrower than 2 * HAIR are boolean noise
 SIMPLIFY = 0.01  # mm: polyline tolerance of the colour regions
+# Corners a fraction of a micron apart give edges that short in the solid, and zero-area
+# triangles in the STL (Katie's was not watertight). So every corner of a solid lies on a
+# GRID (mm), and band k's solid is k * INSET (mm) inside the band's edge: a band's edge
+# never touches the edge of the band below, and the boolean has no edges to intersect
+# where the two meet. 10 um at most, far below what a 0.4 mm nozzle can show.
+GRID = 1e-3
+INSET = 2 * GRID
 # Standing steady: the centre of mass must lie this far inside the support, or the tenon
 # carries the whole weight on one side and the figure leans by the slot clearance.
 SUPPORT_MARGIN = 3.0  # mm
@@ -320,7 +327,9 @@ def layout(fig: Figure) -> Layout:
         com = centre_x(bands, band_z(fig))
     # the tenon reaches 0.05 mm into the body, so the two always fuse into one solid
     tenon = box(foot[0], -fig.tenon_h, foot[1], 0.05)
-    bands[0] = _clean(unary_union([bands[0], tenon]))
+    # _tidy, not _clean: simplifying would move band 0's edge by up to SIMPLIFY, more than
+    # band 1's INSET, where band 1 runs along it
+    bands[0] = _tidy(unary_union([bands[0], tenon]))
     x0, y0, x1, y1 = body.bounds
     return Layout(regions, body, tenon, bands, foot, cut, (x1 - x0, y1 - y0), com, post)
 
@@ -343,12 +352,13 @@ def thickness(fig: Figure) -> float:
 
 
 def _wire(coords) -> Wire | None:
-    """A closed polygon wire, without the near-duplicate points OCCT cannot join."""
+    """A closed polygon wire, without the repeated points OCCT cannot join (on the GRID,
+    two different points are at least GRID apart)."""
     pts = []
     for x, y in list(coords)[:-1]:
-        if not pts or abs(x - pts[-1][0]) + abs(y - pts[-1][1]) > 1e-3:
+        if not pts or math.dist((x, y), pts[-1]) > GRID / 2:
             pts.append((x, y))
-    while len(pts) > 1 and abs(pts[0][0] - pts[-1][0]) + abs(pts[0][1] - pts[-1][1]) <= 1e-3:
+    while len(pts) > 1 and math.dist(pts[0], pts[-1]) <= GRID / 2:
         pts.pop()
     if len(pts) < 3 or Polygon(pts).area < 1e-4:
         return None
@@ -356,8 +366,10 @@ def _wire(coords) -> Wire | None:
 
 
 def _faces(geom: BaseGeometry) -> list[Face]:
+    """The faces of a footprint, with every corner on the GRID: all the solids of a part
+    share it, whatever changed a band last (the tenon, the post, the hanging tab)."""
     faces = []
-    for p in polygons(geom):
+    for p in polygons(shapely.set_precision(geom, GRID)):
         outer = _wire(p.exterior.coords)
         if outer is None:
             continue
@@ -366,29 +378,37 @@ def _faces(geom: BaseGeometry) -> list[Face]:
     return faces
 
 
+def inset(band: BaseGeometry, k: int) -> BaseGeometry:
+    """The footprint of band k's solid: k * INSET inside the band's edge (see INSET)."""
+    return band.buffer(-k * INSET, join_style="mitre") if k else band
+
+
 def slab(geom: BaseGeometry, z0: float, z1: float) -> Part:
-    """A footprint extruded from z0 to z1."""
+    """A footprint extruded from z0 to z1: one solid per polygon, not joined.
+
+    The polygons of a band never overlap, so they need no boolean here: `fuse` joins them
+    with the bands in one go. (Joining them one by one took 90 s for Katie's 150 pieces.)
+    """
     # a clockwise ring has a downward normal: always give the direction (halloween gotcha)
     solids = [Pos(0, 0, z0) * extrude(f, z1 - z0, dir=(0, 0, 1)) for f in _faces(geom)]
-    part = solids[0]
-    for s in solids[1:]:
-        part = part + s
-    return part
+    return solids[0] if len(solids) == 1 else Part(solids)
 
 
 @cache
 def band_parts(fig: Figure) -> tuple[Part, ...]:
     """One solid per band, in the print pose (lying, front face up)."""
     lay = layout(fig)
-    return tuple(slab(g, z0, z1) for g, (z0, z1) in zip(lay.bands, band_z(fig)))
+    return tuple(slab(inset(g, k), z0, z1)
+                 for k, (g, (z0, z1)) in enumerate(zip(lay.bands, band_z(fig))))
 
 
 def fuse(parts) -> Part:
-    """One solid from stacked parts. The parts may be cached: they are not changed."""
+    """One solid from stacked parts, in a single boolean (faster than one per part). The
+    parts may be cached: they are not changed."""
     part = Pos() * parts[0]  # a copy: clean() works in place, and parts[0] may be cached
-    for p in parts[1:]:
-        part = part + p
-    return part.clean()
+    # `+` with a list keeps the result a Part (fuse() would return a bare Solid, whose `&`
+    # gives None instead of an empty part)
+    return (part + list(parts[1:])).clean()
 
 
 @cache

@@ -13,6 +13,7 @@ from shapely.ops import unary_union
 from linux3d import params as P
 from linux3d import pedestal, relief, svg
 from linux3d.figures import DROP, FIGURES, Figure, figure, parse_value
+from linux3d.filaments import FILAMENTS, SHELF
 
 FIGS = list(FIGURES.values())
 IDS = list(FIGURES)
@@ -126,6 +127,29 @@ def test_larry_head_is_white():
     assert lay.bands[1].contains(head)
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_arch_logo_leaves_the_trademark_sign_out(kind):
+    """The owner's choice: the ™ beside the A is too small to print whole below 140 mm."""
+    lay = layout_of(kind, FIGURES["arch_logo"])
+    assert len(relief.polygons(lay.regions["blue"])) == 1  # the A alone
+    assert len(relief.polygons(lay.bands[1])) == 1
+
+
+def test_fedora_logo_leaves_the_wordmark_out():
+    """The SVG has the "fedora" wordmark beside the mark: the figure is the square mark."""
+    lay = relief.layout(FIGURES["fedora_logo"])
+    x0, y0, x1, y1 = unary_union(list(lay.regions.values())).bounds
+    assert x1 - x0 == pytest.approx(y1 - y0, rel=0.02)
+
+
+def test_katie_stands_on_her_shoe_with_a_post_under_the_lifted_foot():
+    """The foot cut keeps her shoe (the drawing stays about 120 mm tall), and the post
+    under her lifted foot carries the centre of mass."""
+    lay = relief.layout(FIGURES["katie"])
+    assert lay.cut < 2.0
+    assert lay.post is not None and lay.beside == 0.0
+
+
 RING = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
 <path d="M10 10 H90 V90 H10 Z M30 30 V70 H70 V30 Z" fill="#000" fill-rule="evenodd"/>
 <circle cx="50" cy="50" r="8" fill="#fff"/></svg>"""
@@ -141,6 +165,11 @@ def test_background_fills_enclosed_holes(tmp_path):
     lay = relief.layout(replace(fig, background="white"))
     paper = Point(0, lay.body.bounds[3] / 2 + 6)  # inside the frame, beside the dot
     assert lay.bands[0].contains(paper) and lay.bands[1].contains(paper)
+
+
+def test_shelf_names_real_filaments():
+    """SHELF repeats names from FILAMENTS: a renamed filament must not slip out of it."""
+    assert set(SHELF) <= set(FILAMENTS) and len(set(SHELF)) == len(SHELF)
 
 
 def test_colour_changes_follow_the_bands():
@@ -292,7 +321,10 @@ def test_centre_of_mass_lies_over_the_support_at_any_height(name, height):
     touch = contacts(lay)
     assert touch[0][0] <= lay.centre_x - relief.SUPPORT_MARGIN
     assert touch[-1][1] >= lay.centre_x + relief.SUPPORT_MARGIN
-    assert lay.foot[0] - 1.5 < touch[0][0] and touch[-1][1] < lay.foot[1] + 1.5
+    # Fedora's bubble curves into the cut so gently that it touches wider than any other
+    # figure, and its curve grows with the figure
+    wider = 1.5 * max(1.0, height / 100) if name == "fedora_logo" else 1.5
+    assert lay.foot[0] - wider < touch[0][0] and touch[-1][1] < lay.foot[1] + wider
 
 
 @pytest.mark.parametrize("name", SUPPORTED)

@@ -5,7 +5,7 @@ USAGE = """\
 usage: linux3d COMMAND [FIGURE ...] [options]
 
 commands:
-  list      the figures and their colour bands
+  list      the figures, their colour bands and the filaments still to buy
   export    STL files and 3MF plates in out/standees and out/ornaments; exit 1 on problems
   slice     slice the 3MF plates with the PrusaSlicer CLI: times, M600 check, projects
   render    PNG previews in out/standees/render and out/ornaments/render (--gif: a GIF too)
@@ -33,6 +33,17 @@ def _figures(names: list[str], sets: list[tuple[str, str]]) -> list:
         changes = {key: parse_value(base, key, value) for key, value in sets}
         figs.append(figure(name, **changes))
     return figs
+
+
+def _to_buy(fig) -> list[str]:
+    """The filaments a figure needs that are not on the shelf (lettering only if there is
+    lettering in its own colour)."""
+    from .filaments import SHELF
+    from .pedestal import text_change
+
+    change = text_change(fig)
+    used = {*fig.bands, fig.pedestal_colour, *([change[1]] if change else [])}
+    return sorted(c for c in used if c not in SHELF)
 
 
 def _fail(message: str) -> None:
@@ -84,10 +95,12 @@ def main(argv: list[str] | None = None) -> None:
         from .figures import FIGURES
 
         for f in FIGURES.values():
+            buy = _to_buy(f)
             print(f"{f.name:12s} {f.height:5.0f} mm  {' -> '.join(f.bands):40s} "
                   f"pedestal {f.pedestal_colour}"
                   + (f", lettering {f.text_colour}" if f.text_colour else "")
-                  + f"; ornament {f.ornament_h:.0f} mm")
+                  + f"; ornament {f.ornament_h:.0f} mm"
+                  + (f"; to buy: {', '.join(buy)}" if buy else ""))
     elif command == "export":
         from .export import export_all
         from .params import OUT

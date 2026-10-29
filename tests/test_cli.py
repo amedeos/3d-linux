@@ -40,6 +40,20 @@ def test_readme_examples_work(argv, monkeypatch):
         ornament.layout(fig)
 
 
+def test_list_names_the_filaments_to_buy(capsys):
+    linux3d.main(["list"])
+    lines = {line.split()[0]: line for line in capsys.readouterr().out.splitlines()}
+    assert lines["fedora_logo"].endswith("to buy: light_blue")
+    assert "to buy" not in lines["konqi"]
+
+
+def test_lettering_colour_counts_only_with_lettering():
+    from linux3d.figures import figure
+
+    assert linux3d._to_buy(figure("tux", text_colour="yellow")) == ["yellow"]
+    assert linux3d._to_buy(figure("tux", text_colour="yellow", title="")) == []
+
+
 def test_readme_has_examples():
     assert len(readme_commands()) >= 5
 

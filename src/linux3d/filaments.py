@@ -1,8 +1,11 @@
-"""The filaments on the shelf, and the PrusaSlicer material profiles.
+"""The filaments, and the PrusaSlicer material profiles.
 
 Only these colours exist for the colour mapping: every SVG colour ends up as one of them.
 The hex values are close to Prusament PETG and are used for the 3MF object colours, the
 M600 entries and the renders. Change them, or add colours, here.
+
+`SHELF` lists the filaments the owner has. The others are official colours of a logo or a
+mascot (Fedora, Katie) that the owner will buy: `linux3d list` marks them.
 """
 
 FILAMENTS = {
@@ -15,7 +18,13 @@ FILAMENTS = {
     "violet": "#5e4a9c",
     "grey": "#7b7c80",
     "blue": "#1f6fd1",
+    # official colours, not on the shelf yet
+    "light_blue": "#51a2da",  # Fedora
+    "light_green": "#bbeb8c",  # Katie's skin
+    "bright_green": "#6ddd6d",  # Katie's hands and tail
+    "yellow": "#ffd465",  # Katie's antlers and hoodie
 }
+SHELF = ("black", "white", "red", "gold", "green", "orange", "violet", "grey", "blue")
 
 # PrusaSlicer filament profiles for the Prusa MK4 Input Shaper printer profile
 MATERIALS = {

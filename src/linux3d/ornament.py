@@ -142,7 +142,7 @@ def layout(fig: Figure) -> OrnamentLayout:
         joined = relief.polygons(unary_union([plain, tab]))
         if len(joined) != 1:  # never drop part of a figure silently
             raise ValueError(f"{fig.name}: the hanging tab does not join the body")
-        bands[0] = relief._clean(joined[0].difference(hole))
+        bands[0] = relief._tidy(joined[0].difference(hole))  # not simplified: see layout()
         cx, cy = relief.centre(bands, z)
         com = (cx if mirror_back else 0.0, cy)
         if abs(com[0] - x) < 0.01:
@@ -177,7 +177,8 @@ def band_parts(fig: Figure, back: bool = False) -> tuple[Part, ...]:
     # band 0 in two slabs: the sockets go up to SOCKET_DEPTH from the glued face
     body = relief.slab(lay.bands[0].difference(sockets), 0.0, P.SOCKET_DEPTH)
     body = body + relief.slab(lay.bands[0], P.SOCKET_DEPTH, z[0][1])
-    return (body, *(relief.slab(g, z0, z1) for g, (z0, z1) in zip(lay.bands[1:], z[1:])))
+    return (body, *(relief.slab(relief.inset(g, k), z0, z1)
+                    for k, (g, (z0, z1)) in enumerate(zip(lay.bands[1:], z[1:]), start=1)))
 
 
 @cache
