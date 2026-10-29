@@ -145,15 +145,21 @@ def plates(figs: list[Figure], coupon: bool = True) -> dict[str, Plate]:
     return out
 
 
+def ornament_fits_bed(fig: Figure, gap: float = 8.0) -> None:
+    """Raise an error if the two halves of the ornament do not fit side by side on the bed.
+    It needs only the 2D layout, so export checks it before it builds or writes anything."""
+    w, h = ornament.layout(fig).size
+    if 2 * w + gap > BED[0] or h > BED[1]:
+        raise ValueError(f"{fig.name}: the two ornament halves ({w:.0f} x {h:.0f} mm) do not "
+                         f"fit side by side on the {BED[0]:.0f} x {BED[1]:.0f} mm bed: make "
+                         f"ornament_h smaller")
+
+
 def ornament_plates(figs: list[Figure], gap: float = 8.0) -> dict[str, Plate]:
     """One plate per ornament: both halves side by side, with the same colour changes."""
     out = {}
     for fig in figs:
-        w, h = ornament.layout(fig).size  # checked in 2D, before the solids are built
-        if 2 * w + gap > BED[0] or h > BED[1]:
-            raise ValueError(f"{fig.name}: the two ornament halves ({w:.0f} x {h:.0f} mm) do "
-                             f"not fit side by side on the {BED[0]:.0f} x {BED[1]:.0f} mm "
-                             f"bed: make ornament_h smaller")
+        ornament_fits_bed(fig, gap)
         halves = _row([ornament.make_half(fig), ornament.make_half(fig, back=True)], gap)
         names = [f"{fig.name} ornament front", f"{fig.name} ornament back"]
         out[ornament_plate_name(fig)] = (
@@ -290,8 +296,14 @@ def export_ornaments(folder: Path, figs: list[Figure]) -> dict[str, list[str]]:
 
 def export_all(out: Path, figs: list[Figure] | None = None,
                coupon: bool = True) -> dict[str, list[str]]:
-    """Standees into out/standees, ornaments into out/ornaments; return the problems."""
+    """Standees into out/standees, ornaments into out/ornaments; return the problems.
+
+    An ornament too large for the bed stops the export before any file is written: the
+    standees and the ornaments of one run always match.
+    """
     figs = figs if figs is not None else list(FIGURES.values())
+    for fig in figs:
+        ornament_fits_bed(fig)
     print(f"== {out / P.STANDEES}")
     report = export_standees(out / P.STANDEES, figs, coupon)
     print(f"\n== {out / P.ORNAMENTS}")

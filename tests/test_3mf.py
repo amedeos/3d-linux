@@ -42,6 +42,14 @@ def test_ornament_halves_too_wide_for_the_bed_are_an_error():
         ornament_plates([figure("plasma_logo", ornament_h=110.0)])
 
 
+def test_export_stops_before_writing_when_an_ornament_does_not_fit(tmp_path):
+    """The check runs on the 2D layouts first: not even the standees are written, so the
+    output folders never hold a half-finished export."""
+    with pytest.raises(ValueError, match="do not fit side by side"):
+        export_all(tmp_path, [figure("larry"), figure("plasma_logo", ornament_h=110.0)])
+    assert not any(tmp_path.iterdir())
+
+
 @pytest.mark.parametrize("name", list(PLATES))
 def test_plate_is_centred_on_the_bed(name):
     # PrusaSlicer arranges around the middle of the bed; the plates start there too
