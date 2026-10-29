@@ -1,5 +1,8 @@
+import numpy as np
 import pytest
+from scipy.spatial import cKDTree
 
+from linux3d import relief
 from linux3d.coupon import coupon_parts
 from linux3d.export import check, mesh_problems
 from linux3d.figures import FIGURES
@@ -17,6 +20,14 @@ def test_part_is_printable(parts, name):
 @pytest.mark.parametrize("name", NAMES)
 def test_stl_mesh_is_watertight(parts, name):
     assert mesh_problems(parts[name]) == []
+
+
+@pytest.mark.parametrize("name", [n for n in NAMES if n.endswith(("_standee", "_front", "_back"))])
+def test_no_corners_a_fraction_of_a_micron_apart(parts, name):
+    """Two corners closer than half the GRID make an edge that short, and zero-area
+    triangles in the STL. The GRID and the INSET of the bands prevent them."""
+    corners = np.array([tuple(v) for v in parts[name].vertices()])
+    assert not cKDTree(corners).query_pairs(relief.GRID / 2)
 
 
 @pytest.mark.parametrize("name", list(FIGURES))
