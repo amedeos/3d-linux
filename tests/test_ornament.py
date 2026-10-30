@@ -35,6 +35,8 @@ def test_glued_ornament_hangs_upright(fig):
     cy = (vf * cf.Y + vb * cb.Y) / (vf + vb)
     x, y, _ = ornament.layout(fig).hole
     assert math.degrees(math.atan2(abs(cx - x), y - cy)) < 1.0
+    # the bands' solids (the hanging preview's mark) give the same centre as the halves
+    assert ornament.mass_centre(fig) == pytest.approx((cx, cy), abs=0.01)
 
 
 @pytest.mark.parametrize("fig", FIGS, ids=IDS)

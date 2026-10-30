@@ -48,7 +48,7 @@ uv run linux3d render [FIGURE ...] [--gif]
 | `coupon.py` | Slot gauge: four slots (`SLOT_GAUGE`) and a test tenon |
 | `export.py` | STL export with checks; 3MF plates (one per print job, named and coloured, M600s as PrusaSlicer metadata); `plan.json`; assembly preview; one folder per kind |
 | `slicer.py` | Optional PrusaSlicer CLI run: time and filament, M600 check against `plan.json`, a second slice with automatic supports that must create none, project 3MFs with the full config |
-| `render.py` | numpy z-buffer renderer (no OpenGL); `figure_images()` and `ornament_images()`, both through `all_images()`; `flat_preview()` shows the bands in 2D; `mask()` rasterises a geometry (also used by the tests) |
+| `render.py` | numpy z-buffer renderer (no OpenGL); `figure_images()` and `ornament_images()`, both through `all_images()`; `flat_preview()` shows the bands in 2D; `hang_preview()` draws an ornament with a plumb line from the top of its hole and a mark on the centre of mass of its solids (`ornament.mass_centre()`, not the 2D centre that placed the hole); `all_images()` first removes an older GIF of the figure (a new one comes only with `--gif`); `mask()` rasterises a geometry (also used by the tests) |
 | `__init__.py` | The `linux3d` command |
 | `assets/` | The SVG artwork with `ATTRIBUTION.md` files. Never edit the SVGs; map colours in `figures.py`. `kde/katie.svg` is traced from a PNG: make it again with `tools/trace_katie.py`, never by hand |
 | `tools/trace_katie.py` | Traces Katie's PNG (the only form of her 2026 design) into an SVG with the drawing's exact palette. vtracer's wheel for Python 3.14 crashes, so it runs in its own Python 3.13 environment (the command is in its docstring) |
@@ -83,7 +83,7 @@ uv run linux3d render [FIGURE ...] [--gif]
 
 1. Run `uv run pytest`. It covers the fill rules, the colour maps (no unknown keys), uniform scale, nested bands, foot and tenon, tenon/slot fit and collisions, flat faces on the layer grid, M600 heights, raised strokes ≥ 85 % of a line, grooves ≥ one line, lettering strokes, floating islands, valid single solids, watertight STLs, the 3MF plates, and the ornaments (hang upright at any size, hole clear of the drawing, halves that line up once glued, blind dowel sockets).
 2. Run `uv run linux3d export`. Every part must print `OK`. Compare the volumes with the previous run.
-3. Look at `out/standees/render/*_flat.png`, `out/ornaments/render/*_flat.png` and the renders (`<name>_back.png` for the back of an ornament).
+3. Look at `out/standees/render/*_flat.png`, `out/ornaments/render/*_flat.png` and the renders (`<name>_back.png` for the back of an ornament, `<name>_hang.png` for its balance: the mark on the centre of mass lies on the plumb line).
 4. If PrusaSlicer is available, run `uv run linux3d slice`: every plate must say `OK`.
 
 ## 3MF and PrusaSlicer notes (from the halloween project)

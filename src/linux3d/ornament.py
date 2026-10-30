@@ -29,7 +29,7 @@ from dataclasses import dataclass, replace
 from functools import cache
 
 import numpy as np
-from build123d import Part, Plane, Pos, Rot
+from build123d import CenterOf, Part, Plane, Pos, Rot
 from shapely import affinity
 from shapely.geometry import Point, Polygon, box
 from shapely.geometry.base import BaseGeometry
@@ -63,8 +63,14 @@ class OrnamentLayout:
     @property
     def tilt(self) -> float:
         """How far the ornament hangs off upright (degrees)."""
-        x, y, _ = self.hole
-        return float(np.degrees(np.arctan2(abs(self.centre[0] - x), y - self.centre[1])))
+        return hang_angle(self.hole, self.centre)
+
+
+def hang_angle(hole: tuple[float, float, float], centre: tuple[float, float]) -> float:
+    """How far an ornament with this hole and centre of mass hangs off upright (degrees).
+    The hook rests on the top of the hole."""
+    x, y, r = hole
+    return float(np.degrees(np.arctan2(abs(centre[0] - x), y + r - centre[1])))
 
 
 def as_ornament(fig: Figure) -> Figure:
@@ -187,6 +193,18 @@ def make_half(fig: Figure, back: bool = False) -> Part:
     if back:
         return _back(make_half(fig), layout(fig))
     return relief.fuse(band_parts(fig))
+
+
+def mass_centre(fig: Figure) -> tuple[float, float]:
+    """x and y of the centre of mass of the glued ornament, measured on the solids of both
+    halves (sockets included), the back half turned over (x -> -x). layout() places the hole
+    with the 2D centre of the bands; this checks it."""
+    total = mx = my = 0.0
+    for side, half in ((1, band_parts(fig)), (-1, band_parts(fig, back=True))):
+        for part in half:
+            v, c = part.volume, part.center(CenterOf.MASS)
+            total, mx, my = total + v, mx + v * side * c.X, my + v * c.Y
+    return mx / total, my / total
 
 
 def coloured(fig: Figure) -> list[tuple[Part, str]]:
