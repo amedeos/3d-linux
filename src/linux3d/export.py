@@ -11,8 +11,9 @@ Each folder has the same layout:
   colours. A standee or ornament plate carries all its colour changes (one M600 per band)
   as PrusaSlicer metadata, so they are already set when you open the file. A pedestal
   plate carries the M600 of its lettering.
-- 3mf/plan.json: the colour changes each plate must have, written from the design.
-  slicer.py checks the real G-code against it, not against the 3MF it is checking.
+- 3mf/plan.json: the filament each plate starts with and the colour changes it must have,
+  written from the design. slicer.py checks the real G-code and its projects against it,
+  not against the 3MF it is checking.
 - 3mf/assembly_preview.3mf: every figure standing on its pedestal, or every ornament glued
   and hanging, only for viewing.
 
@@ -169,10 +170,22 @@ def ornament_plates(figs: list[Figure], gap: float = 8.0) -> dict[str, Plate]:
     return out
 
 
-def planned_changes(all_plates: dict[str, Plate]) -> dict[str, list[list]]:
-    """plate name -> [[print_z, filament], ...] (JSON friendly)."""
-    return {name: [[round(z, 2), c] for z, c in changes]
-            for name, (_, changes) in all_plates.items()}
+def plate_plan(all_plates: dict[str, Plate]) -> dict[str, dict]:
+    """plate name -> {"start": filament, "changes": [[print_z, filament], ...]} (JSON
+    friendly). The start filament is the colour of every object on the plate: a plate has
+    one filament until its first M600, so objects that start in different colours are an
+    error."""
+    plan = {}
+    for name, (objects, changes) in all_plates.items():
+        if not objects:
+            raise ValueError(f"plate {name} has no objects")
+        starts = sorted({colour for _, _, colour in objects})
+        if len(starts) != 1:
+            raise ValueError(f"plate {name}: the objects must start in one filament, "
+                             f"not {', '.join(starts)}")
+        plan[name] = {"start": starts[0],
+                      "changes": [[round(z, 2), c] for z, c in changes]}
+    return plan
 
 
 def _named(part: Part, name: str, colour: str) -> Part:
@@ -256,6 +269,7 @@ def _write(folder: Path, parts: dict[str, Part], all_plates: dict[str, Plate],
            preview: list[tuple[str, Part, str]]) -> dict[str, list[str]]:
     """Write the STLs into folder/stl, the plates and plan.json into folder/3mf; return the
     problems of every part."""
+    new_plan = plate_plan(all_plates)  # it checks the plates: before writing into folder
     stl_dir, mf_dir = folder / "stl", folder / "3mf"
     stl_dir.mkdir(parents=True, exist_ok=True)
     mf_dir.mkdir(parents=True, exist_ok=True)
@@ -271,7 +285,7 @@ def _write(folder: Path, parts: dict[str, Part], all_plates: dict[str, Plate],
         print(f"{name + '.3mf':52s} {f'M600 at {note}' if note else 'no colour change'}")
     plan_path = mf_dir / PLAN  # keep the plates of figures exported earlier
     plan = json.loads(plan_path.read_text(encoding="utf-8")) if plan_path.is_file() else {}
-    plan.update(planned_changes(all_plates))
+    plan.update(new_plan)
     plan_path.write_text(json.dumps(plan, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     write_3mf(mf_dir / f"{PREVIEW}.3mf", preview)
     print(f"{PREVIEW + '.3mf':52s} view only")
@@ -320,7 +334,7 @@ def remove_standee_outputs(folder: Path, fig: Figure) -> list[str]:
     plan_path = folder / "3mf" / PLAN
     if plan_path.is_file():
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
-        kept = {name: changes for name, changes in plan.items() if not name.startswith(plates)}
+        kept = {name: entry for name, entry in plan.items() if not name.startswith(plates)}
         if kept != plan:
             removed += [f"{plan_path}: {name}" for name in sorted(set(plan) - set(kept))]
             if kept:

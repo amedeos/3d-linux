@@ -85,8 +85,8 @@ Prusa MK4 (Input Shaper firmware), **Prusament PETG** (PLA also works), 0.4 mm n
 
 There are three kinds of files, in `out/standees/` and in `out/ornaments/`. Use whichever you like:
 
-- **`3mf/projects/*.3mf` — easiest.** PrusaSlicer projects with the MK4 + 0.20mm STRUCTURAL + Prusament PETG settings already loaded, and every colour change already set.
-- **`3mf/*.3mf`** — the same plates without print settings. They also include the colour changes. Use them with any printer profile.
+- **`3mf/projects/*.3mf` — easiest.** PrusaSlicer projects with the MK4 + 0.20mm STRUCTURAL + Prusament PETG settings already loaded, and every colour change already set. The filament colour is the colour of the first band, so PrusaSlicer shows the right colour from the first layer (the Prusament PETG profile would show orange). That is why PrusaSlicer marks the filament preset as "(modified)": this is expected, and the print settings are still the profile's.
+- **`3mf/*.3mf`** — the same plates without print settings. They also include the colour changes. Use them with any printer profile. PrusaSlicer shows their first band in the colour of the filament profile you pick (orange for Prusament PETG); the print is the same.
 - **`stl/*.stl`** — one file per part, already in its print position. Add the colour changes yourself.
 
 The standees (`out/standees/`):

@@ -12,9 +12,12 @@ from linux3d.export import (
     PLAN,
     export_all,
     m600_metadata,
+    ornament_plate_name,
     ornament_plates,
-    planned_changes,
+    pedestal_plate_name,
+    plate_plan,
     plates,
+    standee_plate_name,
     write_3mf,
 )
 from linux3d.figures import FIGURES, figure
@@ -120,18 +123,19 @@ def test_plan_is_merged_across_exports(tmp_path):
     ornaments go into their own folders, each with its own plan."""
     plan_path = tmp_path / STANDEES / "3mf" / PLAN
     plan_path.parent.mkdir(parents=True)
-    plan_path.write_text(json.dumps({"earlier_plate": [[2.6, "white"]]}), encoding="utf-8")
+    earlier = {"start": "black", "changes": [[2.6, "white"]]}
+    plan_path.write_text(json.dumps({"earlier_plate": earlier}), encoding="utf-8")
     small = figure("larry", height=40.0, title="", ornament_h=40.0)
     export_all(tmp_path, [small], coupon=False)
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
-    assert plan["earlier_plate"] == [[2.6, "white"]]
-    for name, changes in planned_changes(plates([small], coupon=False)).items():
-        assert plan[name] == changes
+    assert plan["earlier_plate"] == earlier
+    for name, entry in plate_plan(plates([small], coupon=False)).items():
+        assert plan[name] == entry
     assert (tmp_path / STANDEES / "3mf" / "larry_standee_black-white.3mf").is_file()
     assert (tmp_path / STANDEES / "stl" / "larry_pedestal.stl").is_file()
     folder = tmp_path / ORNAMENTS
     plan = json.loads((folder / "3mf" / PLAN).read_text(encoding="utf-8"))
-    assert plan == planned_changes(ornament_plates([small]))
+    assert plan == plate_plan(ornament_plates([small]))
     assert (folder / "3mf" / "larry_ornament_black-white.3mf").is_file()
     assert (folder / "3mf" / "assembly_preview.3mf").is_file()
     assert {p.name for p in (folder / "stl").iterdir()} == {"larry_ornament_front.stl",
@@ -165,13 +169,15 @@ def test_ornament_only_figure_loses_its_old_standee_outputs(tmp_path):
     for path in old + kept:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x")
-    plan = {"larry_standee_black-white": [[2.6, "white"]], "larry_pedestal_black-white": [],
-            "konqi_standee_x": [[2.6, "green"]]}
+    konqi = {"start": "black", "changes": [[2.6, "green"]]}
+    plan = {"larry_standee_black-white": {"start": "black", "changes": [[2.6, "white"]]},
+            "larry_pedestal_black-white": {"start": "black", "changes": []},
+            "konqi_standee_x": konqi}
     (folder / "3mf" / PLAN).write_text(json.dumps(plan), encoding="utf-8")
     removed = remove_standee_outputs(folder, figure("larry", standee=False))
     assert not any(p.exists() for p in old) and all(p.exists() for p in kept)
     assert json.loads((folder / "3mf" / PLAN).read_text(encoding="utf-8")) == {
-        "konqi_standee_x": [[2.6, "green"]]}
+        "konqi_standee_x": konqi}
     assert len(removed) == len(old) + 2  # the files and the two plan entries
 
 
@@ -182,7 +188,8 @@ def test_removing_the_last_standee_removes_the_plan_and_the_preview(tmp_path):
 
     folder = tmp_path / STANDEES / "3mf"
     folder.mkdir(parents=True)
-    (folder / PLAN).write_text(json.dumps({"larry_standee_black-white": []}), encoding="utf-8")
+    (folder / PLAN).write_text(json.dumps({"larry_standee_black-white": {
+        "start": "black", "changes": []}}), encoding="utf-8")
     with zipfile.ZipFile(folder / f"{PREVIEW}.3mf", "w") as z:
         z.writestr("3D/3dmodel.model", '<object name="larry pedestal"/>')
     remove_standee_outputs(tmp_path / STANDEES, figure("larry", standee=False))
@@ -241,11 +248,38 @@ def test_project_gets_the_config_from_the_gcode(tmp_path):
     config = config_from_gcode(gcode)
     assert "; binary_gcode = 1" in config and "; layer_height = 0.2" in config
     plate = tmp_path / "plate.3mf"
-    objects, changes = PLATES["larry_standee_black-white"]
+    objects, changes = PLATES[standee_plate_name(FIGURES["larry"])]
     write_3mf(plate, objects, changes)
     project = tmp_path / "projects" / "plate.3mf"
     make_project(plate, config, project)
     assert zipfile.ZipFile(project).read(CONFIG_ENTRY).decode() == config
+
+
+def test_plan_starts_each_plate_in_its_first_filament():
+    """plan.json gives the filament each plate starts with, from the design: slice writes it
+    into the project as the filament colour (Znurt starts in violet, not in orange)."""
+    plan = plate_plan(PLATES)
+    for fig in STANDEE_FIGS:
+        assert plan[standee_plate_name(fig)]["start"] == fig.bands[0]
+        assert plan[pedestal_plate_name(fig)]["start"] == fig.pedestal_colour
+    for fig in FIGS:
+        assert plan[ornament_plate_name(fig)]["start"] == fig.bands[0]
+    assert plan["coupon_slot_gauge"]["start"] == "grey"
+
+
+@pytest.mark.parametrize("objects, message", [
+    ([("a", None, "black"), ("b", None, "white")], "must start in one filament, not black, "
+                                                   "white"),
+    ([], "has no objects"),
+])
+def test_plate_without_one_start_filament_is_refused(tmp_path, objects, message):
+    """A plate has one filament until its first M600, so a project has one filament colour.
+    The plates are checked before anything is written into their folder."""
+    from linux3d.export import _write
+
+    with pytest.raises(ValueError, match=message):
+        _write(tmp_path / "out", {}, {"p": (objects, [])}, [])
+    assert not (tmp_path / "out").exists()
 
 
 def test_export_reports_posts_and_leans():

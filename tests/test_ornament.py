@@ -176,10 +176,10 @@ LOPSIDED = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 92">
 <circle id="ball" cx="52" cy="22" r="8" fill="#f07318"/></svg>"""
 
 
-def _drawing(tmp_path, text: str, hang_from: str) -> Figure:
+def _drawing(tmp_path, text: str, hang_from: str, bands=("blue", "orange")) -> Figure:
     path = tmp_path / "balls.svg"
     path.write_text(text, encoding="utf-8")
-    return Figure(name="balls", title="", svg=str(path), bands=("blue", "orange"),
+    return Figure(name="balls", title="", svg=str(path), bands=bands,
                   standee=False, ornament_h=60.0, hole_d=3.0, hang_from=hang_from)
 
 
@@ -202,6 +202,14 @@ def test_hole_through_a_shape_on_a_symmetric_outline_lies_on_the_axis(tmp_path):
 def test_hole_that_would_not_hang_a_symmetric_ornament_is_an_error(tmp_path, ball, message):
     with pytest.raises(ValueError, match=message):
         ornament.layout(_drawing(tmp_path, SYMMETRIC, ball))
+
+
+def test_hole_through_a_shape_with_no_drawing_in_the_body_colour(tmp_path):
+    """Only the backing is in the body colour (like Plasma, Debian and Arch, which have no
+    white in the drawing): the eyelet has no body region to take over, and that is fine."""
+    orange = SYMMETRIC.replace('fill="#1f6fd1"', 'fill="#f07318"')
+    lay = ornament.layout(_drawing(tmp_path, orange, "ball", bands=("white", "orange")))
+    assert lay.hole[0] == 0.0
 
 
 def test_hole_far_beside_the_centre_of_mass_is_an_error(tmp_path):

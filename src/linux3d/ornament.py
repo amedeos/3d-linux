@@ -233,9 +233,9 @@ def _hung_from_shape(fig: Figure, view: Figure, regions: dict[str, BaseGeometry]
     if _room(eyelet, x, y) < need - 1e-9:
         raise _wall_error(fig, max(0.0, _room(eyelet, x, y) - r))
     regions = dict(regions)
-    if body_colour != filament:
+    if body_colour != filament and body_colour in regions:  # Plasma has no white region
         regions[body_colour] = regions[body_colour].difference(eyelet)
-    regions[filament] = unary_union([regions[filament], eyelet])
+    regions[filament] = unary_union([regions.get(filament, Polygon()), eyelet])
     plain = relief.colour_bands(view, body, regions)  # once: the hole only cuts them
     z = relief.band_z(view)
 
