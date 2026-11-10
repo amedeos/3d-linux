@@ -49,22 +49,67 @@ def _look_at(eye, target, up=(0, 0, 1)):
     return np.stack([r, u, -f])  # rows: camera x, y, z (camera looks along -z)
 
 
-def render(items, path, elev=28.0, azim=-60.0, zoom=1.0, size=(900, 700), ss=2,
-           target=None, distance=None, tolerance=0.08, background=((0.93, 0.92, 0.95),
-                                                                (0.72, 0.70, 0.76))):
-    """Render [(shape, colour), ...] to `path`. Angles in degrees, azim around +z."""
-    meshes = [(*_mesh(s, tolerance), _rgb(c)) for s, c in items]
-    pts = np.concatenate([m[0].reshape(-1, 3) for m in meshes if len(m[0])])
+# at zoom 1, the object fills the image but for this share of its width or height on each
+# side (whichever is tighter): render() fits what the camera really sees, so a wide object
+# in an upright image is not cut off
+MARGIN = 0.06
+# render()'s camera and image when the caller gives none (gif() fits with the same ones)
+ELEV, AZIM, SIZE, TOLERANCE = 28.0, -60.0, (900, 700), 0.08
+
+
+def _meshes(items, tolerance: float = TOLERANCE) -> list:
+    """(triangles, normals, colour) of every (shape, colour) item."""
+    return [(*_mesh(s, tolerance), _rgb(c)) for s, c in items]
+
+
+def _vertices(meshes) -> np.ndarray:
+    """Every vertex of the meshes, as rows of x, y, z."""
+    return np.concatenate([m[0].reshape(-1, 3) for m in meshes if len(m[0])])
+
+
+def _points(items, tolerance: float = TOLERANCE) -> np.ndarray:
+    """Every mesh vertex of [(shape, colour), ...], as rows of x, y, z."""
+    return _vertices(_meshes(items, tolerance))
+
+
+def _camera(pts, elev, azim, target=None, distance=None):
+    """Eye, rotation (rows: camera x, y, z) and viewing direction for a camera that looks at
+    the middle of the points (or at target) from these angles."""
     lo, hi = pts.min(0), pts.max(0)
     center = (lo + hi) / 2 if target is None else np.asarray(target, float)
     radius = np.linalg.norm(hi - lo) / 2
     el, az = np.radians(elev), np.radians(azim)
     direction = np.array([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)])
-    dist = distance or radius * 3.2
-    eye = center + direction * dist
-    rot = _look_at(eye, center)
+    eye = center + direction * (distance or radius * 3.2)
+    return eye, _look_at(eye, center), direction
+
+
+def fit(pts, size, elev, azim, target=None, distance=None) -> float:
+    """The focal length (pixels of an image of `size`) at which the points fill the image
+    up to MARGIN on its tighter side, seen from this camera."""
+    eye, rot, _ = _camera(pts, elev, azim, target, distance)
+    cam = (pts - eye) @ rot.T
+    z = np.maximum(-cam[:, 2], 1e-3)
+    spread_x, spread_y = np.abs(cam[:, 0] / z).max(), np.abs(cam[:, 1] / z).max()
+    return (1 - 2 * MARGIN) * min(size[0] / 2 / spread_x, size[1] / 2 / spread_y)
+
+
+def render(items, path, elev=ELEV, azim=AZIM, zoom=1.0, size=SIZE, ss=2, target=None,
+           distance=None, tolerance=TOLERANCE, focal=None, meshes=None,
+           background=((0.93, 0.92, 0.95), (0.72, 0.70, 0.76))):
+    """Render [(shape, colour), ...] to `path`. Angles in degrees, azim around +z.
+
+    focal: the focal length at zoom 1, in pixels of the image; None fits the object into
+    the image (fit()). gif() gives every frame the same one, so the object keeps its size.
+    meshes: _meshes(items) made already (gif() tessellates a turn's items only once).
+    """
+    meshes = _meshes(items, tolerance) if meshes is None else meshes
+    pts = _vertices(meshes)
+    eye, rot, direction = _camera(pts, elev, azim, target, distance)
     w, h = size[0] * ss, size[1] * ss
-    focal = 0.5 * h * dist / (radius * 1.15) * zoom
+    if focal is None:
+        focal = fit(pts, size, elev, azim, target, distance)
+    focal *= ss * zoom
 
     zbuf = np.full((h, w), np.inf)
     nbuf = np.zeros((h, w, 3))
@@ -150,16 +195,30 @@ def gif(frames_items, path, duration=80, per_frame=None, bounce=True, **kw):
     (bounce=False: it only plays forth, for a full turn).
 
     per_frame: optional list of extra render() arguments, one dict per frame (camera moves).
+    Every frame gets the focal length that fits the object in all of them, so it does not
+    grow and shrink as the camera turns.
     """
     frames = list(frames_items)
     if not frames:
         raise ValueError("gif() needs at least one frame")
     path = Path(path)
     tmp_paths = [path.with_suffix(f".{k:03d}.png") for k in range(len(frames))]
+    views = [{**kw, **(per_frame[k] if per_frame else {})} for k in range(len(frames))]
+    made = {}  # the frames of a turn share one item list: tessellate it once (~2 s)
+
+    def meshes(items, view):
+        key = (id(items), view.get("tolerance", TOLERANCE))
+        if key not in made:
+            made[key] = _meshes(items, key[1])
+        return made[key]
+
+    focal = min(fit(_vertices(meshes(items, v)), v.get("size", SIZE), v.get("elev", ELEV),
+                    v.get("azim", AZIM), v.get("target"), v.get("distance"))
+                for items, v in zip(frames, views))
     try:
         images = []
-        for k, (items, tmp) in enumerate(zip(frames, tmp_paths)):
-            render(items, tmp, **kw, **(per_frame[k] if per_frame else {}))
+        for items, view, tmp in zip(frames, views, tmp_paths):
+            render(items, tmp, **{"focal": focal, "meshes": meshes(items, view), **view})
             images.append(Image.open(tmp).convert("P", palette=Image.ADAPTIVE))
         seq = images + images[-2:0:-1] if bounce else images
         seq[0].save(path, save_all=True, append_images=seq[1:], duration=duration, loop=0)
@@ -169,8 +228,12 @@ def gif(frames_items, path, duration=80, per_frame=None, bounce=True, **kw):
 
 
 # straight from the front, a little from above and from the right
-FRONT = {"elev": 12, "azim": -70, "zoom": 1.25}
-FLAT = {"elev": 90, "azim": -90, "zoom": 1.3}  # the print pose, seen from above
+FRONT = {"elev": 12, "azim": -70}
+# an ornament wider than this many times its height gets a landscape image: render() would
+# fit Znurt's saucer into an upright one too, but as a thin strip
+WIDE = 1.3
+FLAT = {"elev": 90, "azim": -90}  # the print pose, seen from above
+STANDEE_VIEWS = ("", "_side", "_print", "_flat")  # the PNGs of a standee: <name><view>.png
 
 
 def scene(fig) -> list:
@@ -290,17 +353,26 @@ def figure_images(fig, out: Path, with_gif: bool = False) -> list[Path]:
     from . import relief
 
     out.mkdir(parents=True, exist_ok=True)
-    paths = [out / f"{fig.name}.png", out / f"{fig.name}_side.png",
-             out / f"{fig.name}_print.png", flat_preview(fig, out / f"{fig.name}_flat.png")]
+    paths = [out / f"{fig.name}{view}.png" for view in STANDEE_VIEWS]
+    flat_preview(fig, paths[3])
     items = scene(fig)  # once: the pedestal colours cost two OCCT booleans
     render(items, paths[0], size=(800, 900), **FRONT)
-    render(items, paths[1], size=(800, 900), elev=18, azim=-20, zoom=1.25)
+    render(items, paths[1], size=(800, 900), elev=18, azim=-20)
     render(relief.coloured(fig, stand=False), paths[2], size=(800, 900), **FLAT)
     if with_gif:  # the camera swings from the left to the right of the figure
         paths.append(out / f"{fig.name}.gif")
         turn = [{"elev": 14, "azim": -90 + a} for a in range(-50, 51, 10)]
-        gif((items for _ in turn), paths[-1], size=(500, 560), zoom=1.25, per_frame=turn)
+        gif((items for _ in turn), paths[-1], size=(500, 560), per_frame=turn)
     return paths
+
+
+def _frames(lay) -> tuple[dict, dict]:
+    """Image size of an ornament's hanging views and of its GIF: upright, or landscape for
+    a wide ornament. render() fits the ornament into either."""
+    w, h = lay.size
+    if w > WIDE * h:
+        return {"size": (1400, 700)}, {"size": (700, 350)}
+    return {"size": (800, 900)}, {"size": (500, 560)}
 
 
 def ornament_images(fig, out: Path, with_gif: bool = False) -> list[Path]:
@@ -316,8 +388,9 @@ def ornament_images(fig, out: Path, with_gif: bool = False) -> list[Path]:
              flat_preview(fig, out / f"{fig.name}_flat.png", bands=lay.bands),
              hang_preview(fig, out / f"{fig.name}_hang.png")]
     items = ornament.coloured(fig)  # once: both halves, turned over and hung up
-    render(items, paths[0], size=(800, 900), **FRONT)
-    render(items, paths[1], size=(800, 900), **{**FRONT, "azim": FRONT["azim"] + 180})
+    still, moving = _frames(lay)
+    render(items, paths[0], **{**FRONT, **still})
+    render(items, paths[1], **{**FRONT, **still, "azim": FRONT["azim"] + 180})
     # the plate: the front half on the left, the mirrored back half on the right
     shift = max(abs(v) for v in lay.bands[0].bounds[::2]) + 4.0
     plate = [(Pos(-shift, 0, 0) * p, f) for p, f in zip(ornament.band_parts(fig), fig.bands)]
@@ -327,22 +400,27 @@ def ornament_images(fig, out: Path, with_gif: bool = False) -> list[Path]:
     if with_gif:  # one full turn: the front, the edge, the back
         paths.append(out / f"{fig.name}.gif")
         turn = [{"elev": 14, "azim": -90 + a} for a in range(0, 360, 15)]
-        gif((items for _ in turn), paths[-1], size=(500, 560), zoom=1.25, per_frame=turn,
-            bounce=False)
+        gif((items for _ in turn), paths[-1], per_frame=turn, bounce=False, **moving)
     return paths
 
 
 def all_images(fig, out: Path = OUT, with_gif: bool = False) -> list[Path]:
-    """The standee's images into out/standees/render, the ornament's into
-    out/ornaments/render.
+    """The standee's images into out/standees/render (none for an ornament only), the
+    ornament's into out/ornaments/render. For a figure the registry defines as an ornament
+    only, older standee images go too (not for a one-off `--set standee=false`).
 
     An older GIF of the figure goes first, even if a render fails later: it would not
     match the new images. A new GIF comes only with with_gif.
     """
     for kind in (STANDEES, ORNAMENTS):
         (out / kind / "render" / f"{fig.name}.gif").unlink(missing_ok=True)
-    return (figure_images(fig, out / STANDEES / "render", with_gif)
-            + ornament_images(fig, out / ORNAMENTS / "render", with_gif))
+    from .export import defined_ornament_only
+
+    if defined_ornament_only(fig):  # its standee's images from a run when it had one
+        for view in STANDEE_VIEWS:
+            (out / STANDEES / "render" / f"{fig.name}{view}.png").unlink(missing_ok=True)
+    standee = figure_images(fig, out / STANDEES / "render", with_gif) if fig.standee else []
+    return standee + ornament_images(fig, out / ORNAMENTS / "render", with_gif)
 
 
 def main(argv: list[str]) -> None:

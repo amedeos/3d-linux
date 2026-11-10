@@ -2,18 +2,13 @@
 
 import pytest
 from build123d import GeomType
-from conftest import KINDS, layout_of, view_of
+from conftest import NAMES, STANDEE_FIGS, fig_id, kinds_of, layout_of, view_of
 
 from linux3d import params as P
 from linux3d import pedestal, relief
-from linux3d.coupon import coupon_parts
 from linux3d.figures import FIGURES
 
 FIGS = list(FIGURES.values())
-IDS = list(FIGURES)
-NAMES = ([f"{n}_{kind}" for n in FIGURES
-          for kind in ("standee", "pedestal", "ornament_front", "ornament_back")]
-         + list(coupon_parts()))
 
 
 def off_grid_faces(part) -> list[float]:
@@ -40,8 +35,7 @@ def test_profile_assumptions():
     assert P.on_grid(P.BASE_T) and P.on_grid(P.BAND_T)
 
 
-@pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("fig", FIGS, ids=IDS)
+@pytest.mark.parametrize("fig, kind", kinds_of(FIGS))
 def test_colour_changes_come_before_each_band(fig, kind):
     # every band starts on a layer boundary, and its M600 comes before its first layer
     view = view_of(kind, fig)
@@ -77,8 +71,7 @@ def _thin_fraction(geom, min_width: float, px_per_mm: float = 20.0) -> float:
     return 1 - opened.sum() / m.sum()
 
 
-@pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("fig", FIGS, ids=IDS)
+@pytest.mark.parametrize("fig, kind", kinds_of(FIGS))
 def test_no_lone_slivers(fig, kind):
     """Every piece of a raised band survives the opening by a line: the 1.5 % area
     allowance of the stroke test cannot hide whole islands that are too thin to print."""
@@ -89,8 +82,7 @@ def test_no_lone_slivers(fig, kind):
         assert lone == [], f"band {k} ({fig.bands[k]})"
 
 
-@pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("fig", FIGS, ids=IDS)
+@pytest.mark.parametrize("fig, kind", kinds_of(FIGS))
 def test_raised_strokes_are_printable(fig, kind):
     # Arachne drops walls thinner than min_bead_width (85 % of a line). Corners always lose
     # a little in the opening, so allow 1.5 % of the area.
@@ -98,8 +90,7 @@ def test_raised_strokes_are_printable(fig, kind):
         assert _thin_fraction(band, P.MIN_STROKE) < 0.015, f"band {k} ({fig.bands[k]})"
 
 
-@pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("fig", FIGS, ids=IDS)
+@pytest.mark.parametrize("fig, kind", kinds_of(FIGS))
 def test_grooves_stay_open(fig, kind):
     """What shows of a lower colour between raised areas is at least one line wide."""
     lay = layout_of(kind, fig)
@@ -111,7 +102,7 @@ def test_grooves_stay_open(fig, kind):
         assert _thin_fraction(lower, P.MIN_GAP) < 0.03, f"under band {k} ({fig.bands[k]})"
 
 
-@pytest.mark.parametrize("fig", FIGS, ids=IDS)
+@pytest.mark.parametrize("fig", STANDEE_FIGS, ids=fig_id)
 def test_lettering_strokes_are_printable(fig):
     text = pedestal.lettering(fig, pedestal.size(fig))
     face = max(text.faces(), key=lambda f: f.center().Z)  # the top of the letters

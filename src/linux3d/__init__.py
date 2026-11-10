@@ -22,28 +22,41 @@ examples:
   uv run linux3d export larry --height 120 --set text_colour=none
   uv run linux3d render konqi --bands black,green,white,red,gold
   uv run linux3d export larry --set ornament_h=80
+  uv run linux3d render znurt              # an ornament only: no standee
 """
 
 
 def _figures(names: list[str], sets: list[tuple[str, str]]) -> list:
-    from .figures import FIGURES, figure, parse_value
+    import sys
+
+    from .figures import FIGURES, STANDEE_ONLY, figure, parse_value
 
     figs = []
     for name in names or list(FIGURES):
         base = figure(name)
         changes = {key: parse_value(base, key, value) for key, value in sets}
-        figs.append(figure(name, **changes))
+        fig = figure(name, **changes)
+        idle = [k for k in changes if k in STANDEE_ONLY]
+        if idle and not fig.standee:
+            options = ", ".join("--height" if k == "height" else f"--set {k}" for k in idle)
+            print(f"linux3d: {name} is an ornament only: {options} "
+                  f"{'does' if len(idle) == 1 else 'do'} nothing for it"
+                  + (" (its size: --set ornament_h=MM)" if "height" in idle else ""),
+                  file=sys.stderr)
+        figs.append(fig)
     return figs
 
 
 def _to_buy(fig) -> list[str]:
-    """The filaments a figure needs that are not on the shelf (lettering only if there is
-    lettering in its own colour)."""
+    """The filaments a figure needs that are not on the shelf (the pedestal only with a
+    standee, the lettering only if there is lettering in its own colour)."""
     from .filaments import SHELF
     from .pedestal import text_change
 
-    change = text_change(fig)
-    used = {*fig.bands, fig.pedestal_colour, *([change[1]] if change else [])}
+    used = set(fig.bands)
+    if fig.standee:
+        change = text_change(fig)
+        used |= {fig.pedestal_colour, *([change[1]] if change else [])}
     return sorted(c for c in used if c not in SHELF)
 
 
@@ -97,10 +110,12 @@ def main(argv: list[str] | None = None) -> None:
 
         for f in FIGURES.values():
             buy = _to_buy(f)
-            print(f"{f.name:12s} {f.height:5.0f} mm  {' -> '.join(f.bands):40s} "
-                  f"pedestal {f.pedestal_colour}"
-                  + (f", lettering {f.text_colour}" if f.text_colour else "")
-                  + f"; ornament {f.ornament_h:.0f} mm"
+            size = f"{f.height:5.0f} mm" if f.standee else "      --"
+            what = (f"pedestal {f.pedestal_colour}"
+                    + (f", lettering {f.text_colour}" if f.text_colour else "")
+                    + f"; ornament {f.ornament_h:.0f} mm" if f.standee
+                    else f"ornament only, {f.ornament_h:.0f} mm")
+            print(f"{f.name:12s} {size}  {' -> '.join(f.bands):40s} {what}"
                   + (f"; to buy: {', '.join(buy)}" if buy else ""))
     elif command == "export":
         from .export import export_all
@@ -119,7 +134,11 @@ def main(argv: list[str] | None = None) -> None:
         from .render import all_images
 
         for fig in figs:
-            for path in all_images(fig, with_gif="--gif" in flags):
+            try:
+                paths = all_images(fig, with_gif="--gif" in flags)
+            except ValueError as e:  # e.g. an ornament whose hole cannot hang it upright
+                _fail(str(e))
+            for path in paths:
                 print("wrote", path)
     else:
         print(f"unknown command {command!r}\n\n{USAGE}")

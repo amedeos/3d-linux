@@ -7,7 +7,7 @@ top of band k, so from the front you see its colour. A tenon under the figure pl
 into a pedestal, which prints standing up.
 
 The same drawing and bands also make a Christmas tree ornament (ornament.py), at its own
-size `ornament_h`.
+size `ornament_h`. A figure with `standee=False` (Znurt) is an ornament only.
 
 The drawing only ever scales uniformly (the Gentoo logo guidelines forbid any
 distortion), so `height` alone sets the size.
@@ -22,6 +22,11 @@ from .params import BAND_T, BASE_T, layers
 
 ASSETS = Path(__file__).resolve().parent / "assets"
 DROP = "drop"  # a colour map value: leave this SVG shape out
+# parameters of the standee and its pedestal only: an ornament only (standee=False) skips
+# their checks, and the command warns that they do nothing for it
+STANDEE_ONLY = ("height", "title", "min_foot", "ground", "support", "max_cut", "tenon_h",
+                "pedestal_colour", "text_colour", "pedestal_h", "pedestal_w", "pedestal_d",
+                "text_h", "text_size")
 
 
 @dataclass(frozen=True)
@@ -42,6 +47,7 @@ class Figure:
     base_t: float = BASE_T  # thickness of the body (band 0), also the tenon
     band_t: float = BAND_T  # every further colour band
     # --- standing up -------------------------------------------------------------------
+    standee: bool = True  # False: an ornament only, with no standee and no pedestal (Znurt)
     min_foot: float = 14.0  # total width of the flat contact at the bottom (mm)
     ground: float = 0.0  # > 0: a bar of the body colour, this high (mm), under the feet
     # when the centre of mass lies beside the foot, add a post of the body colour under
@@ -64,6 +70,10 @@ class Figure:
     ornament_h: float = 70.0  # height of the drawing (mm); the hanging tab comes on top
     ornament_t: float = layers(6)  # body (band 0) of each half; the colour bands keep band_t
     hole_d: float = 4.0  # hanging hole, for a hook or a ribbon
+    # "" = a tab with the hole on top, above the centre of mass. An SVG element id (as in
+    # `colours`): the hole goes through that shape instead (Znurt's antenna ball), and the
+    # shape and the body around it become an eyelet in the shape's colour
+    hang_from: str = ""
 
     @property
     def svg_path(self) -> Path:
@@ -75,8 +85,9 @@ class Figure:
     def validate(self) -> None:
         if not self.bands:
             raise ValueError(f"{self.name}: bands is empty; give at least one filament")
-        names = list(self.bands) + [self.pedestal_colour]
-        names += [c for c in (self.background, self.text_colour) if c]
+        names = list(self.bands) + [c for c in (self.background,) if c]
+        if self.standee:  # an ornament only has no pedestal and no lettering
+            names += [self.pedestal_colour] + [c for c in (self.text_colour,) if c]
         mapped = [v for _, v in self.colours if v != DROP]
         names += mapped
         unknown = sorted({n for n in names if n not in FILAMENTS})
@@ -91,20 +102,23 @@ class Figure:
                                  "add it to bands or change the map (--set colours=...)")
         if self.ground < 0:
             raise ValueError(f"{self.name}: ground must not be negative")
-        for key in ("height", "tenon_h", "base_t", "band_t", "pedestal_h", "text_h",
-                    "ornament_h", "ornament_t", "hole_d"):
+        def checked(keys: tuple[str, ...]) -> list[str]:
+            return [k for k in keys if self.standee or k not in STANDEE_ONLY]
+
+        for key in checked(("height", "tenon_h", "base_t", "band_t", "pedestal_h", "text_h",
+                            "ornament_h", "ornament_t", "hole_d")):
             if getattr(self, key) <= 0:
                 raise ValueError(f"{self.name}: {key} must be greater than 0")
         # every band, the pedestal top and the lettering must end on a layer boundary, or
         # the M600 lands one layer late and the slicer rounds the faces away
-        for key in ("base_t", "band_t", "pedestal_h", "text_h", "ornament_t"):
+        for key in checked(("base_t", "band_t", "pedestal_h", "text_h", "ornament_t")):
             if not P.on_grid(getattr(self, key)):
                 raise ValueError(f"{self.name}: {key} = {getattr(self, key)} is not a whole "
                                  f"number of {P.LAYER} mm layers")
         if self.margin < 0:
             raise ValueError(f"{self.name}: margin must not be negative")
         slot = P.snap_up(self.tenon_h + P.SLOT_FLOOR_GAP)
-        if slot > self.pedestal_h - P.PEDESTAL_FLOOR:
+        if self.standee and slot > self.pedestal_h - P.PEDESTAL_FLOOR:
             raise ValueError(f"{self.name}: the slot ({slot} mm) is too deep for a "
                              f"{self.pedestal_h} mm pedestal: make pedestal_h at least "
                              f"{P.snap_up(slot + P.PEDESTAL_FLOOR)} or tenon_h smaller")
@@ -115,6 +129,14 @@ class Figure:
             raise ValueError(f"{self.name}: unknown backing {self.backing!r}")
         if not self.svg_path.is_file():
             raise FileNotFoundError(self.svg_path)
+        if self.hang_from:
+            from .relief import kept  # not at the top: relief imports this module
+
+            if self.hang_from not in {s.key for s, _ in kept(self)}:
+                raise ValueError(f"{self.name}: hang_from {self.hang_from!r} is not a shape the "
+                                 f"figure keeps from {self.svg} (it is missing, dropped by the "
+                                 "colour map, or shading below min_opacity); name it as in "
+                                 "colours (an element id, id:stroke for a stroke, or #n)")
 
 
 FIGURES = {f.name: f for f in [
@@ -216,6 +238,24 @@ FIGURES = {f.name: f for f in [
         # lifted foot (18.6 mm up). The tenon reaches under both
         height=120.0, min_foot=8.0, text_colour="gold",
     ),
+    Figure(
+        name="znurt", title="Znurt", svg="gentoo/Znurt.svg",
+        # Gentoo's flying saucer: both purples of the drawing (the rim and the dome) print
+        # in violet, the inner ring in white, the face in black and the antenna ball in
+        # orange. The antenna is a faint line (opacity 0.26) that would count as shading,
+        # but it joins the ball to the dome: it prints in the body colour
+        bands=("violet", "white", "black", "orange"),
+        colours=(("path3922:stroke", "violet"),),
+        standee=False,  # an ornament only
+        # the saucer is 2.9 times as wide as it is high: 104 mm wide at 35 mm. Both halves
+        # fit side by side on the bed up to about 40 mm
+        ornament_h=35.0,
+        # it hangs from its antenna: the hole goes through the ball, which becomes an
+        # orange eyelet. The hole moves 0.34 mm towards the centre of mass and keeps 2.3 mm
+        # of wall around it (2.08 is the least), so 35 mm is not far above the smallest
+        # size it can have (about 28 mm)
+        hang_from="path3843", hole_d=3.0,
+    ),
 ]}
 
 
@@ -245,6 +285,8 @@ def parse_value(fig: Figure, key: str, text: str):
         return text.lower() in ("1", "true", "yes")
     if isinstance(current, float):
         return float(text)
+    if kinds[key] is str:  # a plain string (hang_from, title): empty, never None
+        return "" if text.lower() == "none" else text
     if text.lower() in ("none", ""):
         return None
     return text

@@ -5,10 +5,17 @@ Run `python -m linux3d.export` first, then `python -m linux3d.slicer [--material
 For every plate in out/standees/3mf and out/ornaments/3mf it:
 1. slices the plate with the Prusa MK4 profiles and reports the print time and filament,
    and checks that every M600 is there exactly where the design wants it (plan.json,
-   written by export.py) and that nothing needs support
-   (a second slice with automatic supports on must create no support at all);
+   written by export.py), that the 3MF gives each one the design's colour, and that
+   nothing needs support (a second slice with automatic supports on must create no
+   support at all);
 2. writes a PrusaSlicer project to 3mf/projects/: the same plate plus the full
    print configuration, so the MK4 settings and the colour change load with one click.
+   The project's filament colour is the plate's start filament (plan.json, passed with
+   --filament-colour): PrusaSlicer ignores the object colours of a 3MF and shows the
+   layers before the first M600 in the colour of the filament profile (#FF8000, orange,
+   for Prusament PETG). So the GUI marks the filament preset as modified. A slice of the
+   project checks that the CLI reads the colour back; what the GUI shows cannot be
+   checked without a display.
 
 PrusaSlicer writes its complete configuration at the end of every G-code file, in the
 same "; key = value" format that it stores inside project 3MF files. We take it from
@@ -31,7 +38,7 @@ import zipfile
 from pathlib import Path
 
 from .export import PLAN, PREVIEW
-from .filaments import DEFAULT_MATERIAL, MATERIALS
+from .filaments import DEFAULT_MATERIAL, FILAMENTS, MATERIALS
 from .params import ORNAMENTS, OUT, STANDEES
 
 PRINTER = "Original Prusa MK4 Input Shaper 0.4 nozzle"
@@ -87,6 +94,7 @@ def summary(gcode: Path) -> dict:
         "m600": len(re.findall(r"^M600", text, re.MULTILINE)),
         "support_lines": text.count(";TYPE:Support material"),
         "printer": value("printer_settings_id"),
+        "colour": value("filament_colour"),
     }
 
 
@@ -103,13 +111,45 @@ def config_from_gcode(gcode: Path) -> str:
     return "\n".join([header, *body]) + "\n"
 
 
-def stored_colour_changes(plate: Path) -> list[float]:
-    """The M600 heights written into a 3MF plate (empty list if there are none)."""
+Change = tuple[float, str]  # (print_z, '#RRGGBB'): an M600 and the colour that follows it
+
+
+def stored_colour_changes(plate: Path) -> list[Change]:
+    """The colour changes written into a 3MF plate (empty list if there are none)."""
     with zipfile.ZipFile(plate) as z:
         if M600_ENTRY not in z.namelist():
             return []
         xml = z.read(M600_ENTRY).decode()
-    return [float(v) for v in re.findall(r'print_z="([\d.]+)"', xml)]
+    return [(float(z), c.upper())
+            for z, c in re.findall(r'print_z="([\d.]+)"[^>]*?\scolor="([^"]*)"', xml)]
+
+
+STALE = "export it again, or delete the plate if no export makes it any more"
+
+
+def plan_entry(plan: dict, name: str) -> tuple[str | None, list[Change] | None, list[str]]:
+    """What the design (plan.json) wants for a plate: the colour it starts with and its
+    colour changes, with colours as '#RRGGBB' like PrusaSlicer writes them (None where
+    plan.json does not say), and the problems."""
+    entry = plan.get(name)
+    if entry is None:
+        return None, None, [f"not in plan.json: {STALE}"]
+    if isinstance(entry, list):  # an older export wrote only [[print_z, filament], ...]
+        start, changes, issues = None, entry, [f"plan.json has no start filament: {STALE}"]
+    elif isinstance(entry, dict) and {"start", "changes"} <= entry.keys():
+        start, changes, issues = entry["start"], entry["changes"], []
+    else:
+        return None, None, ["incomplete entry in plan.json: export again"]
+    unknown = sorted({f for f in [start, *(c for _, c in changes)]
+                      if f is not None and f not in FILAMENTS})
+    if unknown:
+        return None, None, [*issues, f"unknown filament {', '.join(unknown)} in plan.json"]
+    return (FILAMENTS[start].upper() if start else None,
+            [(round(z, 2), FILAMENTS[c].upper()) for z, c in changes], issues)
+
+
+def _changes_text(changes: list[Change]) -> str:
+    return ", ".join(f"Z {z:.2f} -> {c}" for z, c in changes) or "none"
 
 
 def make_project(plate: Path, config: str, out: Path) -> None:
@@ -129,31 +169,38 @@ def main(folder: Path = OUT / STANDEES / "3mf", material: str = DEFAULT_MATERIAL
     problems = 0
     with tempfile.TemporaryDirectory() as tmp:
         for plate in plates:
+            # the start colour and the colour changes come from the design (plan.json), not
+            # from the 3MF under check
+            start, changes, issues = plan_entry(plan, plate.stem)
             gcode = Path(tmp) / f"{plate.stem}.gcode"
-            slice_plate(cmd, plate, gcode, material)
+            slice_plate(cmd, plate, gcode, material,
+                        extra=("--filament-colour", start) if start else ())
             info = summary(gcode)
-            # expected heights come from the design (plan.json), not from the 3MF
-            issues = []
-            if plate.stem not in plan:
-                issues.append("not in plan.json: export again")
-            expected = [round(z, 2) for z, _ in plan.get(plate.stem, [])]
-            stored = stored_colour_changes(plate)
             probe = Path(tmp) / f"{plate.stem}.supports.gcode"
             slice_plate(cmd, plate, probe, material, extra=tuple(AUTO_SUPPORT))
-            if summary(probe)["support_lines"]:
-                issues.append(f"needs support ({summary(probe)['support_lines']} extrusions)")
-            if stored != expected:
-                issues.append(f"3MF stores M600 at {stored}, the design says {expected}")
-            if info["m600"] != len(expected) or info["m600_z"] != expected:
-                issues.append(f"expected M600 at {expected}, found {info['m600']} "
-                              f"at {info['m600_z']}")
+            support = summary(probe)["support_lines"]
+            if support:
+                issues.append(f"needs support ({support} extrusions)")
+            if changes is not None:  # None: plan.json cannot tell, the problem says why
+                stored = stored_colour_changes(plate)
+                if stored != changes:
+                    issues.append(f"3MF stores {_changes_text(stored)}, "
+                                  f"the design says {_changes_text(changes)}")
+                expected = [z for z, _ in changes]
+                if info["m600"] != len(expected) or info["m600_z"] != expected:
+                    issues.append(f"expected M600 at {expected}, found {info['m600']} "
+                                  f"at {info['m600_z']}")
             project = folder / "projects" / plate.name
             make_project(plate, config_from_gcode(gcode), project)
-            # the project alone (no profile options) must give the same printer
+            # the project alone (no profile options) must give the same printer and the
+            # design's start colour
             check = Path(tmp) / f"{plate.stem}.check.gcode"
             slice_plate(cmd, project, check, material=None)
-            if summary(check)["printer"] != info["printer"]:
+            loaded = summary(check)
+            if loaded["printer"] != info["printer"]:
                 issues.append("project does not carry the printer settings")
+            if start and loaded["colour"].upper() != start:
+                issues.append(f"project starts in {loaded['colour']}, the design in {start}")
             problems += bool(issues)
             print(f"{plate.stem:54s} {info['time']:>12s} {info['filament_g']:>7s} g  "
                   f"M600 at Z {info['m600_z'] or '-'}  {'OK' if not issues else '; '.join(issues)}")

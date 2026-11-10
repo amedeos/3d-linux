@@ -6,7 +6,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 import shapely
-from conftest import KINDS, layout_of, view_of
+from conftest import KINDS, STANDEE_FIGS, fig_id, kinds_of, layout_of, view_of
 from shapely.geometry import Point, Polygon
 from shapely.ops import unary_union
 
@@ -40,8 +40,7 @@ def test_colour_map_matches_the_drawing(fig):
     assert [k for k, _ in fig.colours if k not in keys] == []
 
 
-@pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("fig", FIGS, ids=IDS)
+@pytest.mark.parametrize("fig, kind", kinds_of(FIGS))
 def test_every_band_shows(fig, kind):
     lay = layout_of(kind, fig)
     assert len(lay.bands) == len(fig.bands)
@@ -49,8 +48,7 @@ def test_every_band_shows(fig, kind):
     assert set(lay.regions) <= set(fig.bands)
 
 
-@pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("fig", FIGS, ids=IDS)
+@pytest.mark.parametrize("fig, kind", kinds_of(FIGS))
 def test_scale_is_uniform(fig, kind):
     """The drawing keeps its proportions (Gentoo's logo guidelines forbid distortion)."""
     fig = view_of(kind, fig)
@@ -66,22 +64,21 @@ def test_scale_is_uniform(fig, kind):
     assert (ax1 - ax0) / (ay1 - ay0) == pytest.approx((x1 - x0) / (y1 - y0), rel=1e-3)
 
 
-@pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("fig", FIGS, ids=IDS)
+@pytest.mark.parametrize("fig, kind", kinds_of(FIGS))
 def test_bands_are_nested(fig, kind):
     assert relief.is_nested(layout_of(kind, fig))
 
 
-@pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("fig", FIGS + [figure("konqi", height=145.0, ornament_h=145.0)],
-                         ids=IDS + ["konqi_145mm"])
+@pytest.mark.parametrize(
+    "fig, kind", kinds_of(FIGS) + [pytest.param(figure("konqi", height=145.0, ornament_h=145.0),
+                                                kind, id=f"konqi_145mm-{kind}") for kind in KINDS])
 def test_bands_are_valid_geometry(fig, kind):
     """At 145 mm, GEOS returned a buffer with crossed rings for Konqi, and the next boolean
     failed: opening() repairs it."""
     assert all(band.is_valid for band in layout_of(kind, fig).bands)
 
 
-@pytest.mark.parametrize("fig", FIGS, ids=IDS)
+@pytest.mark.parametrize("fig", STANDEE_FIGS, ids=fig_id)
 def test_foot_and_tenon(fig):
     lay = relief.layout(fig)
     assert lay.foot[1] - lay.foot[0] >= min(fig.min_foot, 8.0)
@@ -99,7 +96,7 @@ def test_the_foot_does_not_cut_into_a_logo(name):
     assert relief.layout(fig).cut <= fig.margin + 0.05
 
 
-@pytest.mark.parametrize("fig", FIGS, ids=IDS)
+@pytest.mark.parametrize("fig", STANDEE_FIGS, ids=fig_id)
 def test_tenon_fits_the_slot(fig):
     lay, s = relief.layout(fig), pedestal.size(fig)
     x0, x1, y0, y1 = s.slot
@@ -108,7 +105,7 @@ def test_tenon_fits_the_slot(fig):
     assert fig.tenon_h + P.SLOT_FLOOR_GAP <= s.slot_depth < fig.pedestal_h
 
 
-@pytest.mark.parametrize("fig", FIGS, ids=IDS)
+@pytest.mark.parametrize("fig", STANDEE_FIGS, ids=fig_id)
 def test_standing_figure_does_not_collide_with_its_pedestal(fig):
     standing = relief.standing(relief.make_figure(fig))
     assert (standing & pedestal.make_pedestal(fig)).volume < 1e-3
@@ -133,6 +130,22 @@ def test_arch_logo_leaves_the_trademark_sign_out(kind):
     lay = layout_of(kind, FIGURES["arch_logo"])
     assert len(relief.polygons(lay.regions["blue"])) == 1  # the A alone
     assert len(relief.polygons(lay.bands[1])) == 1
+
+
+def test_empty_plain_string_stays_a_string():
+    """`--set hang_from=` (or =none) must give "", the default, not None: None would be
+    another Figure for the caches. An optional field still gets None."""
+    fig = FIGURES["znurt"]
+    assert parse_value(fig, "hang_from", "") == "" and parse_value(fig, "hang_from", "none") == ""
+    assert figure("znurt", hang_from=parse_value(fig, "hang_from", "")) == replace(fig, hang_from="")
+    assert parse_value(fig, "text_colour", "none") is None
+
+
+def test_ornament_only_figure_skips_the_pedestal_checks():
+    """Znurt has no pedestal: a pedestal too low for the slot does not matter for it."""
+    figure("znurt", pedestal_h=8.0, tenon_h=0.0)
+    with pytest.raises(ValueError, match="too deep"):
+        figure("larry", pedestal_h=8.0)
 
 
 def test_fedora_logo_leaves_the_wordmark_out():
@@ -288,7 +301,7 @@ def test_small_figure_keeps_room_for_its_lettering():
     assert pedestal.lettering(fig, s) is not None
 
 
-@pytest.mark.parametrize("fig", FIGS, ids=IDS)
+@pytest.mark.parametrize("fig", STANDEE_FIGS, ids=fig_id)
 def test_plinth_grows_upwards_from_the_bottom(fig):
     """Both extrusions go up (dir given), so the plinth spans exactly -h .. 0."""
     bb = pedestal._plinth(pedestal.size(fig)).bounding_box()
@@ -297,7 +310,7 @@ def test_plinth_grows_upwards_from_the_bottom(fig):
 
 # --- stability --------------------------------------------------------------------------
 HEIGHTS = (60.0, 100.0, 150.0)
-SUPPORTED = [n for n, f in FIGURES.items() if f.support]
+SUPPORTED = [n for n, f in FIGURES.items() if f.support and f.standee]
 # grams per cm3 of model, from PrusaSlicer (PETG, 15 % infill): the thin standees are
 # almost solid, the pedestals are mostly infill
 STANDEE_DENSITY, PEDESTAL_DENSITY = 0.92, 0.43
@@ -392,9 +405,9 @@ def test_figure_that_cannot_be_supported_is_refused(tmp_path):
     assert lay.post is None and lay.beside > 0
 
 
-@pytest.mark.parametrize("fig", FIGS + [figure("larry", height=60.0),
+@pytest.mark.parametrize("fig", STANDEE_FIGS + [figure("larry", height=60.0),
                                         figure("plasma_logo", height=150.0)],
-                         ids=IDS + ["larry-60", "plasma_logo-150"])
+                         ids=[f.name for f in STANDEE_FIGS] + ["larry-60", "plasma_logo-150"])
 def test_assembly_does_not_tip_easily(fig):
     """Figure and pedestal must tilt at least 25° in every direction before they fall."""
     st = relief.standing(relief.make_figure(fig))
