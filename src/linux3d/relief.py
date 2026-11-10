@@ -109,25 +109,54 @@ def opening(geom: BaseGeometry, r: float) -> BaseGeometry:
                                                        keep_collapsed=False)
 
 
-def drawing(fig: Figure) -> dict[str, BaseGeometry]:
-    """Filament -> visible area of the drawing, scaled to the figure height (y up)."""
+def kept(fig: Figure) -> list[tuple[svg.Shape2D, str | None]]:
+    """The shapes of the drawing that the figure keeps, each with the filament its colour
+    map names (None: the nearest band colour). The others are DROPped or are shading
+    (more transparent than min_opacity)."""
     cmap = fig.colour_map()
-    kept, targets = [], {}
+    out = []
     for s in _shapes(fig.svg_path):
         target = cmap.get(s.key) or cmap.get(s.colour)
         if target == DROP or (target is None and s.opacity < fig.min_opacity):
             continue
-        kept.append(s)
-        targets[s.index] = target
-    shown = svg.visible(kept)
+        out.append((s, target))
+    return out
+
+
+@cache
+def _placed(fig: Figure) -> tuple[tuple[str, str, BaseGeometry], ...]:
+    """(SVG key, filament, visible area scaled to the figure height, y up) of every shape
+    the figure keeps, in paint order. Cached: drawing() and shape_area() both need it, and
+    svg.visible() is the costly part of reading a large drawing."""
+    targets = {s.index: target for s, target in kept(fig)}
+    shown = svg.visible([s for s, _ in kept(fig)])
     x0, y0, x1, y1 = unary_union([s.geom for s in shown]).bounds
     k = fig.height / (y1 - y0)
+    return tuple((s.key, targets[s.index] or nearest(s.colour, list(fig.bands)),
+                  affinity.affine_transform(s.geom, [k, 0, 0, k, -k * (x0 + x1) / 2, -k * y0]))
+                 for s in shown)
+
+
+def drawing(fig: Figure) -> dict[str, BaseGeometry]:
+    """Filament -> visible area of the drawing, scaled to the figure height (y up)."""
     out: dict[str, list] = {}
-    for s in shown:
-        filament = targets[s.index] or nearest(s.colour, list(fig.bands))
-        g = affinity.affine_transform(s.geom, [k, 0, 0, k, -k * (x0 + x1) / 2, -k * y0])
+    for _, filament, g in _placed(fig):
         out.setdefault(filament, []).append(g)
     return {f: shapely.make_valid(unary_union(gs).simplify(SIMPLIFY)) for f, gs in out.items()}
+
+
+def shape_area(fig: Figure, key: str) -> tuple[str, BaseGeometry]:
+    """The filament and the visible area of one shape of the drawing (`key` as in the
+    colour map), in the same frame as drawing()."""
+    found = [(f, g) for k, f, g in _placed(fig) if k == key]
+    if not found:
+        raise ValueError(f"{fig.name}: the drawing shows no shape {key!r}")
+    filaments = {f for f, _ in found}
+    if len(filaments) > 1:  # several shapes with one key (<use> clones), in other colours
+        raise ValueError(f"{fig.name}: {len(found)} shapes share the key {key!r}, in "
+                         f"{sorted(filaments)}: name one of them")
+    geom = unary_union([g for _, g in found])
+    return filaments.pop(), shapely.make_valid(geom.simplify(SIMPLIFY))
 
 
 def _backing(fig: Figure, art: BaseGeometry) -> BaseGeometry:
@@ -301,6 +330,9 @@ def colour_bands(fig: Figure, body: BaseGeometry,
 @cache
 def layout(fig: Figure) -> Layout:
     fig.validate()
+    if not fig.standee:  # every standee, pedestal and preview of one starts here
+        raise ValueError(f"{fig.name} is an ornament only (standee=False): it has no standee "
+                         "and no pedestal")
     regions, body = artwork(fig)
     if fig.ground > 0:  # a bar under everything within `ground` of the bottom
         x0, y0, x1, _ = body.bounds

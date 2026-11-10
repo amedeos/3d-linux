@@ -91,6 +91,87 @@ def test_hang_preview_drops_the_plumb_line_from_the_hole(tmp_path):
     assert len(hole) > r * px and abs(hole.mean() - line_x) <= 1.0
 
 
+def test_ornament_only_figure_gets_no_standee_images(tmp_path, monkeypatch):
+    """Znurt has no standee: all_images() makes only its ornament's images."""
+    monkeypatch.setattr(render, "render", lambda *a, **k: None)
+    paths = render.all_images(FIGURES["znurt"], tmp_path)
+    assert paths and all(p.parent == tmp_path / P.ORNAMENTS / "render" for p in paths)
+    assert not (tmp_path / P.STANDEES).exists()
+
+
+def test_ornament_only_figure_loses_its_old_standee_images(tmp_path, monkeypatch):
+    """Images of a standee from a run when the figure still had one no longer match."""
+    monkeypatch.setattr(render, "render", lambda *a, **k: None)
+    old = [tmp_path / P.STANDEES / "render" / f"znurt{view}.png"
+           for view in render.STANDEE_VIEWS]
+    for path in old:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+    render.all_images(FIGURES["znurt"], tmp_path)
+    assert not any(p.exists() for p in old)
+
+
+def test_one_off_ornament_only_keeps_the_standee_images(tmp_path, monkeypatch):
+    """`--set standee=false` for one run: Larry's standee images stay."""
+    from linux3d.figures import figure
+
+    monkeypatch.setattr(render, "ornament_images", lambda fig, out, with_gif=False: [])
+    old = tmp_path / P.STANDEES / "render" / "larry.png"
+    old.parent.mkdir(parents=True)
+    old.write_bytes(b"x")
+    render.all_images(figure("larry", standee=False), tmp_path)
+    assert old.exists()
+
+
+def test_render_fits_what_the_camera_sees():
+    """A long bar seen in an upright image: the fit uses the projected outline, so the bar
+    reaches the margin on its long side and is not cut off (fitting a sphere to the image
+    height cut Znurt's saucer off)."""
+    from build123d import Box
+
+    pts = render._points([(Box(120, 6, 6), "black")])
+    size = (400, 600)
+    for elev, azim in ((12, -70), (90, -90), (30, 10)):
+        focal = render.fit(pts, size, elev, azim)
+        eye, rot, _ = render._camera(pts, elev, azim)
+        cam = (pts - eye) @ rot.T
+        x = focal * cam[:, 0] / -cam[:, 2]
+        y = focal * cam[:, 1] / -cam[:, 2]
+        room = (1 - 2 * render.MARGIN) * np.array(size) / 2
+        assert np.abs(x).max() <= room[0] + 1e-6 and np.abs(y).max() <= room[1] + 1e-6
+        assert max(np.abs(x).max() / room[0], np.abs(y).max() / room[1]) > 0.999
+
+
+def test_gif_frames_share_one_focal_length(tmp_path, monkeypatch):
+    """Fitted frame by frame, a turning object would grow and shrink."""
+    from build123d import Box
+
+    seen = []
+    monkeypatch.setattr(render, "render", lambda items, path, **k: seen.append(k["focal"]))
+    monkeypatch.setattr(render.Image, "open", lambda path: Image.new("RGB", (4, 4)))
+    turn = [{"elev": 14, "azim": a} for a in range(0, 360, 45)]
+    items = [(Box(120, 6, 30), "black")]
+    render.gif((items for _ in turn), tmp_path / "turn.gif", size=(300, 200), per_frame=turn)
+    assert len(seen) == len(turn) and len(set(seen)) == 1
+    assert seen[0] == min(render.fit(render._points(items), (300, 200), 14, a["azim"])
+                          for a in turn)
+
+
+def test_wide_ornament_gets_a_landscape_frame(tmp_path, monkeypatch):
+    """render() fits the height of the image: Znurt's saucer, 2.8 times as wide as high,
+    lost both ends in the upright frame. A square ornament keeps the upright frame."""
+    sizes = {}
+    monkeypatch.setattr(render, "render", lambda items, path, **k: sizes.update({path.name: k}))
+    monkeypatch.setattr(render, "gif", lambda frames, path, **k: sizes.update({path.name: k}))
+    for name in ("znurt", "kde_logo"):
+        render.ornament_images(FIGURES[name], tmp_path, with_gif=True)
+    for view in ("znurt.png", "znurt_back.png", "znurt.gif"):
+        w, h = sizes[view]["size"]
+        assert w == 2 * h
+    assert sizes["kde_logo.png"]["size"] == (800, 900)
+    assert sizes["kde_logo.gif"]["size"] == (500, 560)
+
+
 def test_images_without_gif_remove_an_old_gif(tmp_path, monkeypatch):
     """A GIF from an earlier run would no longer match the new images: five figures kept
     GIFs older than their PNGs."""

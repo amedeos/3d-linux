@@ -1,6 +1,6 @@
 # 3d-linux: Linux logos and mascots for your desk and your Christmas tree 🐧🎄
 
-Parametric, printable figures of Linux logos and mascots: the **Gentoo** logo, **Larry the Cow**, the **KDE** logo, the **Plasma** logo, **Konqi**, **Katie**, **Tux**, the **GNU** head, and the **Debian**, **Arch Linux** and **Fedora** logos. Each one is a colourful standee that stands upright on a pedestal with its name on it, and also a **Christmas tree ornament** with the drawing on both sides.
+Parametric, printable figures of Linux logos and mascots: the **Gentoo** logo, **Larry the Cow**, the **KDE** logo, the **Plasma** logo, **Konqi**, **Katie**, **Tux**, the **GNU** head, and the **Debian**, **Arch Linux** and **Fedora** logos. Each one is a colourful standee that stands upright on a pedestal with its name on it, and also a **Christmas tree ornament** with the drawing on both sides. **Znurt**, Gentoo's flying saucer, is an ornament only.
 
 Everything is written in Python with [build123d](https://github.com/gumyr/build123d). The shapes come from the official SVG artwork, and every size, colour and clearance is a parameter.
 
@@ -26,8 +26,9 @@ Everything is written in Python with [build123d](https://github.com/gumyr/build1
 | `debian_logo` | 90 mm | white → red | red, white lettering | 70 mm, same on both sides |
 | `arch_logo` | 100 mm | white → blue (without the ™) | blue, white lettering | 70 mm, back mirrored |
 | `fedora_logo` | 100 mm | light blue → white | light blue, white lettering | 70 mm, back mirrored |
+| `znurt` | — | violet → white → black → orange | — | 35 mm (104 mm wide), back mirrored, hangs from its antenna |
 
-The height is the height of the drawing. The ornaments use the same colour bands as the standees.
+The height is the height of the drawing. The ornaments use the same colour bands as the standees. Znurt is an ornament only: no standee and no pedestal.
 
 The filaments are the ones on the author's shelf (Prusament PETG): black, white, red, yellow gold, green, orange, violet, grey and blue. Katie and the Fedora logo keep their official colours instead, which are not on the shelf: light blue (Fedora, #51a2da) and light green, bright green and yellow (Katie; her amber prints in yellow gold). `uv run linux3d list` shows them as "to buy". Change the filaments in `src/linux3d/filaments.py`.
 
@@ -39,14 +40,14 @@ The filaments are the ones on the author's shelf (Prusament PETG): black, white,
 
 ```sh
 uv sync
-uv run pytest                     # ~9 min: SVG reading, bands, layers, fit, printability, ornaments, 3MF, CLI
+uv run pytest                     # ~11 min: SVG reading, bands, layers, fit, printability, ornaments, 3MF, CLI
 uv run linux3d list               # the figures and their colour bands
 uv run linux3d export             # STL files and 3MF plates in out/standees and out/ornaments
 uv run linux3d slice              # optional, needs PrusaSlicer: times, M600 check, projects
 uv run linux3d render             # PNG previews in out/*/render (add --gif for a turning GIF)
 ```
 
-`export` exits with status 1 if a part has a problem. Every command makes both the standees and the ornaments. The output has one folder per kind, with the same layout inside:
+`export` exits with status 1 if a part has a problem. Every command makes both the standees and the ornaments (only the ornament for Znurt). The output has one folder per kind, with the same layout inside:
 
 | Folder | Contents |
 |---|---|
@@ -72,7 +73,7 @@ uv run linux3d export gentoo_logo --bands violet,grey --set colours=path919=viol
 uv run linux3d slice --material pla                      # slice with Prusament PLA
 ```
 
-Useful parameters: `height`, `bands`, `support` (a post when the figure would lean, see Stability), `colours` (SVG element id or colour → filament, e.g. `--set colours=path919=violet,#b8b8b8=drop`), `margin` (border around the drawing), `backing` (`outline`, `hull`, `circle` or `rounded_rect`), `base_t` and `band_t` (band thickness), `min_foot` and `tenon_h`, `pedestal_colour`, `text_colour`, `pedestal_h`, `pedestal_w`, `pedestal_d`, `title`. For the ornaments: `ornament_h` (height of the drawing), `ornament_t` (body of each half) and `hole_d` (hanging hole). `--height` changes only the standee. Both halves of an ornament must fit side by side on the bed, so `ornament_h` goes up to about 100 mm for the Plasma logo and 110 mm for Larry; beyond that, `export` stops with an error before it writes any file.
+Useful parameters: `height`, `bands`, `support` (a post when the figure would lean, see Stability), `colours` (SVG element id or colour → filament, e.g. `--set colours=path919=violet,#b8b8b8=drop`), `margin` (border around the drawing), `backing` (`outline`, `hull`, `circle` or `rounded_rect`), `base_t` and `band_t` (band thickness), `min_foot` and `tenon_h`, `pedestal_colour`, `text_colour`, `pedestal_h`, `pedestal_w`, `pedestal_d`, `title`. For the ornaments: `ornament_h` (height of the drawing), `ornament_t` (body of each half), `hole_d` (hanging hole), `hang_from` (an SVG element id: the hole goes through that shape instead of a tab, see below) and `standee` (`false` for an ornament only). `--height` changes only the standee. Both halves of an ornament must fit side by side on the bed, so `ornament_h` goes up to about 100 mm for the Plasma logo, 110 mm for Larry and 40 mm for the wide Znurt; beyond that, `export` stops with an error before it writes any file.
 
 Thicknesses and heights (`base_t`, `band_t`, `pedestal_h`, `text_h`, `ornament_t`) must be whole numbers of 0.2 mm layers; the command refuses other values, because the colour change would land one layer late.
 
@@ -131,6 +132,7 @@ The ornaments (`out/ornaments/`), both halves on one plate:
 | `arch_logo_ornament_white-blue` | blue at 1.40 mm | 22 min | 9 g |
 | `fedora_logo_ornament_light_blue-white` | white at 1.40 mm | 29 min | 14 g |
 | `katie_ornament_black-light_green-bright_green-white-yellow-gold` | light green 1.40, bright green 2.20, white 3.00, yellow 3.80, gold 4.60 mm | 45 min | 10 g |
+| `znurt_ornament_violet-white-black-orange` | white 1.40, black 2.20, orange 3.00 mm | 19 min | 7 g |
 
 \* PrusaSlicer 2.9.6 estimates (Prusament PETG, 0.20mm STRUCTURAL), not counting the time for the filament changes.
 
@@ -161,20 +163,20 @@ The slot is 0.10 mm wider than the tenon on each side. This worked well in PETG 
 
 ## Christmas tree ornaments
 
-Every figure is also an ornament for the Christmas tree, 70 mm high (plus the hanging tab), with the drawing on both sides.
+Every figure is also an ornament for the Christmas tree, 70 mm high (plus the hanging tab), with the drawing on both sides. Znurt is only an ornament: its saucer is 35 mm high and 104 mm wide.
 
 - **Two halves, glued back to back.** With one extruder, the face on the bed comes out in one colour. So each ornament is two halves, printed together on one plate with the same colour changes. Glue them with their flat bed faces together.
-- **The back.** Turned over, the back half must have the mirror image of the front's outline, or the two do not line up. If the outline is symmetric (the KDE square, the Plasma and Debian discs), the back half is simply a copy of the front, and the drawing reads the right way round from behind too. Otherwise (Gentoo, Larry, Konqi, Katie, Tux, GNU, Arch, Fedora) the back half is the mirror image: from behind, the drawing looks as if you saw it through the ornament.
-- **It hangs upright.** A tab with a 4 mm hole (for an ornament hook or a thin ribbon) sits on top, straight above the centre of mass, so the ornament does not hang crooked. The tab is in the body colour and lies outside the drawing, which keeps its shape and colours. `export` prints how far each ornament hangs off upright (0.01° at most). `out/ornaments/render/<name>_hang.png` checks it on the solids: a plumb line drops from the top of the hole, where the hook rests, and the mark on the centre of mass of the solids lies on it. The hole does not always sit over the middle of the drawing: Larry's head on the right balances his body and tail on the left, so his hole sits above the ear on the left, next to the horn. Both checks treat the ornament as solid plastic. The real print has sparse infill inside the thicker colour bands, which moves the centre of mass a little: measured on the sliced G-code, by 0.3 mm at most (Katie, 0.4°).
+- **The back.** Turned over, the back half must have the mirror image of the front's outline, or the two do not line up. If the outline is symmetric (the KDE square, the Plasma and Debian discs), the back half is simply a copy of the front, and the drawing reads the right way round from behind too. Otherwise (Gentoo, Larry, Konqi, Katie, Tux, GNU, Arch, Fedora, Znurt) the back half is the mirror image: from behind, the drawing looks as if you saw it through the ornament.
+- **It hangs upright.** A tab with a 4 mm hole (for an ornament hook or a thin ribbon) sits on top, straight above the centre of mass, so the ornament does not hang crooked. The tab is in the body colour and lies outside the drawing, which keeps its shape and colours. `export` prints how far each ornament hangs off upright (0.01° at most). `out/ornaments/render/<name>_hang.png` checks it on the solids: a plumb line drops from the top of the hole, where the hook rests, and the mark on the centre of mass of the solids lies on it. The hole does not always sit over the middle of the drawing: Larry's head on the right balances his body and tail on the left, so his hole sits above the ear on the left, next to the horn. Znurt hangs from its antenna instead (`hang_from`): the 3 mm hole goes through the ball, which becomes an orange eyelet together with the border around it. The ball lies 0.3 mm beside the centre of mass, so the hole sits that far off the middle of the eyelet, and Znurt hangs upright too. Both checks treat the ornament as solid plastic. The real print has sparse infill inside the thicker colour bands, which moves the centre of mass a little: measured on the sliced G-code, by 0.3 mm at most (Katie, 0.4°).
 - **Dowels line the halves up.** The glued face of each half has two small blind holes (2 mm wide, 0.6 mm deep). Cut two pieces of 1.75 mm filament, about 1 mm long, and put them into the holes of one half before you glue: they hold the two halves in place while the glue sets.
 - **Glue.** For PETG, use cyanoacrylate (super glue) or a two-part epoxy, a thin layer, and press the halves together for a minute. A toothpick through both hanging holes helps to line them up too.
-- Each half is thin (1.2 mm body + 0.8 mm per colour band), so a glued ornament weighs only 9 to 21 g.
+- Each half is thin (1.2 mm body + 0.8 mm per colour band), so a glued ornament weighs only 7 to 21 g.
 
 ## Artwork, trademarks and license
 
 The models use official artwork. See the `ATTRIBUTION.md` files in `src/linux3d/assets/`:
 
-- the Gentoo logo and Larry the Cow: CC BY-SA 2.5 (Gentoo Foundation, Lennart Andre Rolland, Matteo Pescarin, Ethan Dunham);
+- the Gentoo logo, Larry the Cow and Znurt: CC BY-SA 2.5 (Gentoo Foundation, Lennart Andre Rolland, Matteo Pescarin, Ethan Dunham, Daniel Robbins, Sebastian Pipping);
 - the KDE and Plasma logos: Breeze icons, LGPL-3.0-or-later;
 - Konqi: designed by Tyson Tan, SVG by Franco Perez, CC BY-SA 4.0;
 - Katie: designed by Tyson Tan (2026), traced to SVG for this project, CC BY-SA 4.0;

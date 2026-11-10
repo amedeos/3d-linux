@@ -4,6 +4,7 @@ import zipfile
 from itertools import combinations
 
 import pytest
+from conftest import STANDEE_FIGS
 
 from linux3d import ornament, pedestal, relief
 from linux3d.export import (
@@ -21,7 +22,7 @@ from linux3d.params import ORNAMENTS, STANDEES
 from linux3d.slicer import CONFIG_ENTRY, M600_ENTRY, config_from_gcode, make_project
 
 FIGS = list(FIGURES.values())
-PLATES = plates(FIGS) | ornament_plates(FIGS)
+PLATES = plates(STANDEE_FIGS) | ornament_plates(FIGS)
 
 
 @pytest.mark.parametrize("name", list(PLATES))
@@ -66,6 +67,9 @@ def test_one_schedule_per_plate():
     for fig in FIGS:
         standee = [p for p in PLATES if p.startswith(f"{fig.name}_standee")]
         ped = [p for p in PLATES if p.startswith(f"{fig.name}_pedestal")]
+        if not fig.standee:  # an ornament only (Znurt)
+            assert standee == ped == []
+            continue
         assert len(standee) == len(ped) == 1
         assert PLATES[standee[0]][1] == relief.colour_changes(fig)
         change = pedestal.text_change(fig)
@@ -132,6 +136,75 @@ def test_plan_is_merged_across_exports(tmp_path):
     assert (folder / "3mf" / "assembly_preview.3mf").is_file()
     assert {p.name for p in (folder / "stl").iterdir()} == {"larry_ornament_front.stl",
                                                             "larry_ornament_back.stl"}
+
+
+def test_ornament_only_figure_exports_only_its_ornament(tmp_path):
+    """Znurt has no standee: export writes nothing into out/standees, not even the slot
+    gauge, and its ornament as usual."""
+    report = export_all(tmp_path, [FIGURES["znurt"]])
+    assert not (tmp_path / STANDEES).exists()
+    assert set(report) == {"znurt_ornament_front", "znurt_ornament_back"}
+    assert not any(report.values())
+    folder = tmp_path / ORNAMENTS
+    assert (folder / "3mf" / "znurt_ornament_violet-white-black-orange.3mf").is_file()
+    assert {p.name for p in (folder / "stl").iterdir()} == {"znurt_ornament_front.stl",
+                                                            "znurt_ornament_back.stl"}
+
+
+def test_ornament_only_figure_loses_its_old_standee_outputs(tmp_path):
+    """A figure that had a standee in an earlier export: its standee and pedestal files and
+    plan entries go (slice would still slice them); other figures' stay."""
+    from linux3d.export import remove_standee_outputs
+
+    folder = tmp_path / STANDEES
+    old = [folder / "stl" / "larry_standee.stl", folder / "stl" / "larry_pedestal.stl",
+           folder / "3mf" / "larry_standee_black-white.3mf",
+           folder / "3mf" / "larry_pedestal_black-white.3mf",
+           folder / "3mf" / "projects" / "larry_standee_black-white.3mf"]
+    kept = [folder / "stl" / "konqi_standee.stl", folder / "3mf" / "larry2_standee_x.3mf"]
+    for path in old + kept:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+    plan = {"larry_standee_black-white": [[2.6, "white"]], "larry_pedestal_black-white": [],
+            "konqi_standee_x": [[2.6, "green"]]}
+    (folder / "3mf" / PLAN).write_text(json.dumps(plan), encoding="utf-8")
+    removed = remove_standee_outputs(folder, figure("larry", standee=False))
+    assert not any(p.exists() for p in old) and all(p.exists() for p in kept)
+    assert json.loads((folder / "3mf" / PLAN).read_text(encoding="utf-8")) == {
+        "konqi_standee_x": [[2.6, "green"]]}
+    assert len(removed) == len(old) + 2  # the files and the two plan entries
+
+
+def test_removing_the_last_standee_removes_the_plan_and_the_preview(tmp_path):
+    """An empty plan.json would make slice fail ("no plates"), and the assembly preview
+    would still show the standee: both go."""
+    from linux3d.export import PREVIEW, remove_standee_outputs
+
+    folder = tmp_path / STANDEES / "3mf"
+    folder.mkdir(parents=True)
+    (folder / PLAN).write_text(json.dumps({"larry_standee_black-white": []}), encoding="utf-8")
+    with zipfile.ZipFile(folder / f"{PREVIEW}.3mf", "w") as z:
+        z.writestr("3D/3dmodel.model", '<object name="larry pedestal"/>')
+    remove_standee_outputs(tmp_path / STANDEES, figure("larry", standee=False))
+    assert not (folder / PLAN).exists() and not (folder / f"{PREVIEW}.3mf").exists()
+
+
+def test_only_figures_defined_as_ornaments_lose_their_standee_outputs():
+    """`--set standee=false` for one run (just Larry's ornament) must not delete Larry's
+    standee files: only a figure the registry defines as an ornament only loses them."""
+    from linux3d.export import defined_ornament_only
+
+    assert defined_ornament_only(FIGURES["znurt"])
+    assert not defined_ornament_only(figure("larry", standee=False))
+
+
+def test_standee_of_an_ornament_only_figure_is_refused():
+    """Every standee and pedestal starts at relief.layout(): it refuses Znurt, so no caller
+    can build a 294 mm standee for it by passing every figure."""
+    with pytest.raises(ValueError, match="ornament only"):
+        plates([FIGURES["znurt"]])
+    with pytest.raises(ValueError, match="ornament only"):
+        pedestal.size(FIGURES["znurt"])
 
 
 def test_export_builds_plates_and_coupon_once(tmp_path, monkeypatch):

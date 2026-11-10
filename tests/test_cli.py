@@ -22,8 +22,10 @@ def readme_commands() -> list[list[str]]:
 
 
 @pytest.mark.parametrize("argv", readme_commands(), ids=" ".join)
-def test_readme_examples_work(argv, monkeypatch):
-    """Run the documented command up to the geometry (no files written)."""
+def test_readme_examples_work(argv, monkeypatch, tmp_path):
+    """Run the documented command up to the geometry (no files written). all_images()
+    removes older images in out/ first: run where that is a scratch folder."""
+    monkeypatch.chdir(tmp_path)
     seen = []
     monkeypatch.setattr("linux3d.export.export_all", lambda out, figs: seen.extend(figs) or {})
     monkeypatch.setattr("linux3d.render.figure_images",
@@ -35,8 +37,9 @@ def test_readme_examples_work(argv, monkeypatch):
         raise SystemExit(0)
     assert e.value.code == 0
     for fig in seen:
-        relief.layout(fig)
-        pedestal.size(fig)
+        if fig.standee:
+            relief.layout(fig)
+            pedestal.size(fig)
         ornament.layout(fig)
 
 
@@ -45,6 +48,7 @@ def test_list_names_the_filaments_to_buy(capsys):
     lines = {line.split()[0]: line for line in capsys.readouterr().out.splitlines()}
     assert lines["fedora_logo"].endswith("to buy: light_blue")
     assert "to buy" not in lines["konqi"]
+    assert "ornament only, 35 mm" in lines["znurt"] and "pedestal" not in lines["znurt"]
 
 
 def test_lettering_colour_counts_only_with_lettering():
@@ -52,6 +56,22 @@ def test_lettering_colour_counts_only_with_lettering():
 
     assert linux3d._to_buy(figure("tux", text_colour="yellow")) == ["yellow"]
     assert linux3d._to_buy(figure("tux", text_colour="yellow", title="")) == []
+    # an ornament only has no pedestal and no lettering to buy filament for
+    assert linux3d._to_buy(figure("znurt", pedestal_colour="yellow")) == []
+
+
+def test_standee_options_of_an_ornament_only_figure_get_a_note(monkeypatch, capsys):
+    """--height and the pedestal options change only standees: for Znurt they would
+    silently do nothing."""
+    monkeypatch.setattr("linux3d.export.export_all", lambda out, figs: {})
+    with pytest.raises(SystemExit):
+        linux3d.main(["export", "znurt", "larry", "--height", "50"])
+    err = capsys.readouterr().err
+    assert "znurt is an ornament only: --height does nothing" in err and "larry" not in err
+    with pytest.raises(SystemExit):
+        linux3d.main(["export", "znurt", "--set", "pedestal_colour=red", "--set", "tenon_h=4"])
+    assert ("--set pedestal_colour, --set tenon_h do nothing for it"
+            in capsys.readouterr().err)
 
 
 def test_readme_has_examples():
@@ -66,8 +86,12 @@ def test_readme_has_examples():
     (["export", "larry", "--set", "ornament_t=0.8"], "dowel sockets"),
     (["export", "gentoo_logo", "--bands", "violet,grey"], "change the map"),
     (["export", "nobody"], "unknown figure"),
+    (["render", "znurt", "--set", "hang_from=path3843x"], "is not a shape the figure keeps"),
+    (["render", "znurt", "--set", "ornament_h=25"], "leaves a wall of only"),
+    (["export", "znurt", "--set", "ornament_h=25"], "leaves a wall of only"),
 ])
-def test_clear_errors(argv, message, capsys):
+def test_clear_errors(argv, message, capsys, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)  # render clears older images in out/ before it fails
     with pytest.raises(SystemExit) as e:
         linux3d.main(argv)
     assert e.value.code == 2

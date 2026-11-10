@@ -1,15 +1,11 @@
 import numpy as np
 import pytest
+from conftest import NAMES, STANDEE_FIGS
 from scipy.spatial import cKDTree
 
 from linux3d import pedestal, relief
-from linux3d.coupon import coupon_parts
 from linux3d.export import check, mesh_problems
 from linux3d.figures import FIGURES
-
-NAMES = ([f"{n}_{kind}" for n in FIGURES
-          for kind in ("standee", "pedestal", "ornament_front", "ornament_back")]
-         + list(coupon_parts()))
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -30,7 +26,7 @@ def test_no_corners_a_fraction_of_a_micron_apart(parts, name):
     assert not cKDTree(corners).query_pairs(relief.GRID / 2)
 
 
-@pytest.mark.parametrize("name", list(FIGURES))
+@pytest.mark.parametrize("name", [f.name for f in STANDEE_FIGS])
 def test_volumes_are_sane(parts, name):
     # a boolean that fails silently can drop half of a part without any error
     standee = parts[f"{name}_standee"].volume / 1000

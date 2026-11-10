@@ -3,6 +3,8 @@
     out/standees/   standees, pedestals and the slot gauge
     out/ornaments/  Christmas tree ornaments (two halves each)
 
+A figure with `standee=False` (Znurt) has only an ornament.
+
 Each folder has the same layout:
 - stl/: one STL per part, already in its print orientation.
 - 3mf/: one 3MF per print job ("plate"), centred on the Prusa MK4 bed, with names and
@@ -294,6 +296,49 @@ def export_ornaments(folder: Path, figs: list[Figure]) -> dict[str, list[str]]:
     return report
 
 
+def defined_ornament_only(fig: Figure) -> bool:
+    """The registry defines the figure as an ornament only (Znurt). A one-off
+    `--set standee=false` does not count: its standee files stay."""
+    return fig.name in FIGURES and not FIGURES[fig.name].standee
+
+
+def remove_standee_outputs(folder: Path, fig: Figure) -> list[str]:
+    """Remove what an earlier export wrote into folder (out/standees) for the standee and
+    pedestal of a figure that is now an ornament only: its STL files, plates, projects and
+    plan.json entries (slice would still slice them), plan.json itself if nothing is left
+    in it (slice would fail on an empty plan), and the assembly preview if it shows the
+    figure (the next export of standees writes a new one). Returns what it removed."""
+    prefixes = (f"{fig.name}_standee", f"{fig.name}_pedestal")
+    plates = tuple(f"{p}_" for p in prefixes)  # plate names go on with the colours
+    removed = []
+    for sub in ("stl", "3mf", "3mf/projects"):
+        for path in sorted((folder / sub).glob("*")) if (folder / sub).is_dir() else []:
+            if path.suffix in (".stl", ".3mf") and (path.stem in prefixes
+                                                     or path.stem.startswith(plates)):
+                path.unlink()
+                removed.append(str(path))
+    plan_path = folder / "3mf" / PLAN
+    if plan_path.is_file():
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        kept = {name: changes for name, changes in plan.items() if not name.startswith(plates)}
+        if kept != plan:
+            removed += [f"{plan_path}: {name}" for name in sorted(set(plan) - set(kept))]
+            if kept:
+                plan_path.write_text(json.dumps(kept, indent=1, sort_keys=True) + "\n",
+                                     encoding="utf-8")
+        if not kept:
+            plan_path.unlink()
+            removed.append(str(plan_path))
+    preview = folder / "3mf" / f"{PREVIEW}.3mf"
+    if preview.is_file():
+        with zipfile.ZipFile(preview) as z:
+            models = [z.read(n).decode() for n in z.namelist() if n.endswith(".model")]
+        if any(f'name="{fig.name} pedestal"' in m for m in models):
+            preview.unlink()
+            removed.append(str(preview))
+    return removed
+
+
 def export_all(out: Path, figs: list[Figure] | None = None,
                coupon: bool = True) -> dict[str, list[str]]:
     """Standees into out/standees, ornaments into out/ornaments; return the problems.
@@ -304,9 +349,19 @@ def export_all(out: Path, figs: list[Figure] | None = None,
     figs = figs if figs is not None else list(FIGURES.values())
     for fig in figs:
         ornament_fits_bed(fig)
-    print(f"== {out / P.STANDEES}")
-    report = export_standees(out / P.STANDEES, figs, coupon)
-    print(f"\n== {out / P.ORNAMENTS}")
+    standees = [fig for fig in figs if fig.standee]  # Znurt is an ornament only
+    for fig in figs:
+        if defined_ornament_only(fig):  # an export from when it still had a standee
+            for item in remove_standee_outputs(out / P.STANDEES, fig):
+                print(f"removed {item} ({fig.name} is an ornament only)")
+    report = {}
+    if standees:
+        print(f"== {out / P.STANDEES}")
+        report = export_standees(out / P.STANDEES, standees, coupon)
+        print()
+    else:
+        print(f"== {out / P.STANDEES}: nothing to do, these figures are ornaments only\n")
+    print(f"== {out / P.ORNAMENTS}")
     return report | export_ornaments(out / P.ORNAMENTS, figs)
 
 

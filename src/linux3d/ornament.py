@@ -17,6 +17,10 @@ More details:
 - A tab with a hole sits on top, straight above the centre of mass of the glued ornament,
   so it hangs upright. It is part of band 0 (the body colour) only: the drawing keeps its
   colours.
+- Or, with `hang_from`, the hole goes through a shape of the drawing (Znurt's antenna
+  ball): no tab, and the shape and the body around it become an eyelet in the shape's
+  colour. The hole moves sideways from the middle of the shape towards the centre of mass,
+  as far as the eyelet allows (with a copied back, it must lie on the axis).
 - Two blind sockets in the glued face take short pieces of 1.75 mm filament as dowels.
   They line the halves up while the glue sets.
 
@@ -25,6 +29,7 @@ and y up, but nothing is cut: the drawing starts at y = 0. Print pose: the front
 z = 0 on the bed. The back half turns over about the y axis (x -> -x).
 """
 
+import math
 from dataclasses import dataclass, replace
 from functools import cache
 
@@ -44,6 +49,10 @@ SOCKET_WALL = 1.5  # least material between a dowel socket and the edge of the b
 # an outline is symmetric if no point of its edge lies farther than this from the edge of
 # its mirror image (mm): then the two halves are the same
 SYMMETRY = 0.05
+MAX_TILT = 1.0  # degrees: the most an ornament may hang off upright
+# the eyelet of `hang_from` reaches this far past `margin` (mm), so it meets the edge of
+# the body instead of stopping a hair short of it
+EYELET_REACH = 0.05
 
 
 @dataclass(frozen=True)
@@ -52,7 +61,7 @@ class OrnamentLayout:
 
     regions: dict[str, BaseGeometry]  # filament -> visible area of the drawing
     body: Polygon  # drawing + backing, without the tab
-    tab: BaseGeometry  # the hanging tab, with its hole
+    tab: BaseGeometry  # the hanging tab, with its hole (empty with `hang_from`)
     bands: list[BaseGeometry]  # printable footprint of every band; bands[0] has the tab
     hole: tuple[float, float, float]  # x, y and radius of the hanging hole
     sockets: tuple[tuple[float, float], ...]  # centres of the dowel sockets
@@ -98,10 +107,16 @@ def _tab(fig: Figure, body: Polygon, x: float) -> tuple[BaseGeometry, Polygon, f
     return tab, Point(x, y).buffer(r, quad_segs=32), y
 
 
-def _sockets(fig: Figure, body: Polygon, mirror_back: bool) -> tuple[tuple[float, float], ...]:
+def _sockets(fig: Figure, body: BaseGeometry,
+             mirror_back: bool) -> tuple[tuple[float, float], ...]:
     """Two dowel sockets far apart, where both halves have one once glued: the lowest point
     inside the body and the point farthest from it; or, if the back half is a copy of the
-    front, the rightmost point inside the body and its mirror image."""
+    front, the rightmost point inside the body and its mirror image.
+
+    If the lowest point and the farthest from it are less than half the body's size apart
+    (the bottom of Znurt's wide saucer and one end), the first socket goes to the point
+    farthest from the second instead (the other end).
+    """
     inner = relief.polygons(body.buffer(-(P.SOCKET_D / 2 + SOCKET_WALL)))
     if not inner:
         raise ValueError(f"{fig.name}: the ornament is too small for the dowel sockets")
@@ -109,6 +124,9 @@ def _sockets(fig: Figure, body: Polygon, mirror_back: bool) -> tuple[tuple[float
     if mirror_back:
         a = pts[pts[:, 1].argmin()]
         b = pts[np.linalg.norm(pts - a, axis=1).argmax()]
+        x0, y0, x1, y1 = body.bounds
+        if np.linalg.norm(b - a) < 0.5 * max(x1 - x0, y1 - y0):
+            a = pts[np.linalg.norm(pts - b, axis=1).argmax()]
     else:
         a = pts[pts[:, 0].argmax()]
         b = (-a[0], a[1])
@@ -126,38 +144,155 @@ def is_symmetric(body: BaseGeometry) -> bool:
     return body.boundary.hausdorff_distance(mirror.boundary) < SYMMETRY
 
 
+def _settle(fig: Figure, what: str, x: float, place, step, z, mirror_back: bool):
+    """Place the hanging hole again until it lies over the centre of mass of the glued
+    ornament: what is placed moves the centre of mass a little.
+
+    place(x) gives (bands, extra) with the hole above x; step(x, cx) gives the next x for
+    the centre of mass at cx. Returns x, the bands, the centre of mass and extra.
+    """
+    for _ in range(4):
+        bands, extra = place(x)
+        cx, cy = relief.centre(bands, z)
+        # With a mirrored back, the glued ornament's centre of mass is that of one half.
+        # With a copy, the two halves' centres lie on both sides of the axis: it is on it.
+        com = (cx if mirror_back else 0.0, cy)
+        nxt = step(x, com[0])
+        if abs(nxt - x) < 0.01:
+            return x, bands, com, extra
+        x = nxt
+    # the hole and the centre of mass would not belong together
+    raise ValueError(f"{fig.name}: {what} does not settle over the centre of mass")
+
+
+def _room(area: BaseGeometry, x: float, y: float) -> float:
+    """How far a point lies inside an area: its distance to the nearest edge (0 outside)."""
+    p = Point(x, y)
+    return area.boundary.distance(p) if area.contains(p) else 0.0
+
+
+def _towards(area: BaseGeometry, x: float, y: float, target: float, need: float) -> float:
+    """x moved along the line at height y towards target, as far as the point keeps `need`
+    of the area all round it. The start must have that room."""
+    def fits(t: float) -> bool:
+        return _room(area, x + t * (target - x), y) >= need - 1e-9
+
+    if fits(1.0):
+        return target
+    lo, hi = 0.0, 1.0
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if fits(mid) else (lo, mid)
+    return x + lo * (target - x)
+
+
+def _wall_error(fig: Figure, wall: float, where: str = "") -> ValueError:
+    """The error for a wall around a hang_from hole thinner than RING_W. The wall is shown
+    rounded down and RING_W rounded up, so the two numbers never look the same."""
+    return ValueError(f"{fig.name}: a {fig.hole_d:g} mm hole through {fig.hang_from}{where} "
+                      f"leaves a wall of only {math.floor(wall * 100) / 100:.2f} mm in its "
+                      f"colour (at least {math.ceil(RING_W * 100) / 100:.2f}): make "
+                      "ornament_h larger or hole_d smaller, or use the tab (hang_from='')")
+
+
+def _hung_from_shape(fig: Figure, view: Figure, regions: dict[str, BaseGeometry],
+                     body: Polygon, mirror_back: bool, shift: float) -> OrnamentLayout:
+    """The layout of an ornament that hangs from a shape of its drawing (`hang_from`).
+
+    No tab. The shape and the body within `margin` of it become an eyelet in the shape's
+    colour, but the eyelet takes over only the body colour (the backing, and parts of the
+    drawing in the body colour such as Znurt's antenna): the other colours of the drawing
+    keep theirs. The hole, with RING_W of wall all round, must lie inside the eyelet, so
+    the wall around it is the shape's colour in every band up to the shape's, and no
+    higher band comes near it: cutting the hole from the cleaned bands leaves no sliver.
+
+    The hole starts at the middle of the shape and moves sideways towards the centre of
+    mass, as far as the eyelet allows. With a copied back (a symmetric outline) it must lie
+    on the axis, or the halves' holes would not line up. Errors: the hole would not lie in
+    the shape (a ring, or a shape off the axis), the wall is too thin, the hole is not above
+    the centre of mass, or the ornament would still hang more than MAX_TILT off upright.
+    """
+    key = fig.hang_from
+    filament, shape = relief.shape_area(view, key)
+    shape = affinity.translate(shape, shift)
+    y = shape.centroid.y
+    x = shape.centroid.x if mirror_back else 0.0  # a copied back: on the axis
+    # the cheap checks first: colour_bands() is the costly part
+    if not shape.contains(Point(x, y)):
+        why = ("its middle lies outside the shape (a ring?)" if mirror_back else
+               "it does not reach the axis of the symmetric outline, where the hole must lie "
+               "for the halves' holes to line up")
+        raise ValueError(f"{fig.name}: the hole cannot go through {key}: {why}; hang it from "
+                         "a shape the hole can go through, or use the tab (hang_from='')")
+    body_colour = fig.bands[0]
+    others = unary_union([g for f, g in regions.items() if f not in (filament, body_colour)])
+    reach = shape.buffer(fig.margin + EYELET_REACH).intersection(body)
+    eyelet = unary_union([shape, reach.difference(others)])
+    r = fig.hole_d / 2
+    need = r + RING_W  # from the middle of the hole to the edge of the eyelet
+    if _room(eyelet, x, y) < need - 1e-9:
+        raise _wall_error(fig, max(0.0, _room(eyelet, x, y) - r))
+    regions = dict(regions)
+    if body_colour != filament:
+        regions[body_colour] = regions[body_colour].difference(eyelet)
+    regions[filament] = unary_union([regions[filament], eyelet])
+    plain = relief.colour_bands(view, body, regions)  # once: the hole only cuts them
+    z = relief.band_z(view)
+
+    def place(x: float):
+        hole = Point(x, y).buffer(r, quad_segs=32)
+        return [relief._tidy(b.difference(hole)) for b in plain], hole  # not simplified
+
+    if mirror_back:
+        x, bands, com, hole = _settle(fig, f"the hole through {key}", x, place,
+                                      lambda x, cx: _towards(eyelet, x, y, cx, need), z, True)
+    else:  # on the axis, where the glued ornament's centre of mass is
+        bands, hole = place(0.0)
+        com = (0.0, relief.centre(bands, z)[1])
+    if y - r <= com[1]:
+        raise ValueError(f"{fig.name}: the hole through {key} does not lie above the centre "
+                         "of mass: use the tab (hang_from='')")
+    tilt = hang_angle((x, y, r), com)
+    if tilt > MAX_TILT:
+        raise ValueError(f"{fig.name}: hung from {key}, it would hang {tilt:.1f}° off upright "
+                         f"(at most {MAX_TILT:g}°): the shape is not above the centre of "
+                         "mass; use the tab (hang_from='')")
+    x0, y0, x1, y1 = bands[0].bounds
+    return OrnamentLayout(regions, body, Polygon(), bands, (x, y, r),
+                          _sockets(fig, body.difference(hole), mirror_back), mirror_back, com,
+                          (x1 - x0, y1 - y0))
+
+
 @cache
 def layout(fig: Figure) -> OrnamentLayout:
     view = as_ornament(fig)
     view.validate()
     regions, body = relief.artwork(view)
     mirror_back = not is_symmetric(body)
+    shift = 0.0
     if not mirror_back:  # the axis at x = 0: turned over, a copy lies exactly behind
         x0, _, x1, _ = body.bounds
-        regions = {f: affinity.translate(g, -(x0 + x1) / 2) for f, g in regions.items()}
-        body = affinity.translate(body, -(x0 + x1) / 2)
+        shift = -(x0 + x1) / 2
+        regions = {f: affinity.translate(g, shift) for f, g in regions.items()}
+        body = affinity.translate(body, shift)
+    if fig.hang_from:
+        return _hung_from_shape(fig, view, regions, body, mirror_back, shift)
     bands = relief.colour_bands(view, body, regions)
     z = relief.band_z(view)
-    plain = bands[0]
-    # The glued ornament hangs with its centre of mass under the hole. With a mirrored
-    # back, that is the centre of mass of one half. With a copy, the two halves' centres
-    # lie on both sides of the axis, so the glued ornament's is on the axis.
-    x = relief.centre_x(bands, z) if mirror_back else 0.0
-    for _ in range(4):  # the tab moves the centre of mass a little: place it again
+
+    def place(x: float):
         tab, hole, y = _tab(view, body, x)
-        joined = relief.polygons(unary_union([plain, tab]))
+        joined = relief.polygons(unary_union([bands[0], tab]))
         if len(joined) != 1:  # never drop part of a figure silently
             raise ValueError(f"{fig.name}: the hanging tab does not join the body")
-        bands[0] = relief._tidy(joined[0].difference(hole))  # not simplified: see layout()
-        cx, cy = relief.centre(bands, z)
-        com = (cx if mirror_back else 0.0, cy)
-        if abs(com[0] - x) < 0.01:
-            break
-        x = com[0]
-    else:  # the tab, the hole and the centre of mass would not belong together
-        raise ValueError(f"{fig.name}: the hanging tab does not settle over the centre of mass")
-    x0, y0, x1, y1 = bands[0].bounds
-    return OrnamentLayout(regions, body, tab.difference(hole), bands, (x, y, fig.hole_d / 2),
+        # not simplified: see relief.layout()
+        return [relief._tidy(joined[0].difference(hole)), *bands[1:]], (tab, hole, y)
+
+    start = relief.centre_x(bands, z) if mirror_back else 0.0
+    x, placed, com, (tab, hole, y) = _settle(fig, "the hanging tab", start, place,
+                                             lambda x, cx: cx, z, mirror_back)
+    x0, y0, x1, y1 = placed[0].bounds
+    return OrnamentLayout(regions, body, tab.difference(hole), placed, (x, y, fig.hole_d / 2),
                           _sockets(fig, body, mirror_back), mirror_back, com,
                           (x1 - x0, y1 - y0))
 
